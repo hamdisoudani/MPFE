@@ -9,22 +9,22 @@ All commits to `hamdisoudani/MPFE` **must** be authored with:
 | Field | Value |
 |---|---|
 | `user.name`  | `hamdisoudani` |
-| `user.email` | `haldisoudani.freelancer@gmail.com` |
+| `user.email` | `hamdisoudani.freelancer@gmail.com` |
 
 Pushing with a different name or email is **forbidden**. Before the first commit in any session verify:
 
 ```bash
 git config --global user.name   # -> hamdisoudani
-git config --global user.email  # -> haldisoudani.freelancer@gmail.com
+git config --global user.email  # -> hamdisoudani.freelancer@gmail.com
 ```
 
 The E2B `desktop` sandbox provisioned by `scripts/e2b_sandbox.py` already has this configured globally, plus env exports in `~/.env_mpfe` (sourced from `~/.bashrc`):
 
 ```
 GIT_AUTHOR_NAME=hamdisoudani
-GIT_AUTHOR_EMAIL=haldisoudani.freelancer@gmail.com
+GIT_AUTHOR_EMAIL=hamdisoudani.freelancer@gmail.com
 GIT_COMMITTER_NAME=hamdisoudani
-GIT_COMMITTER_EMAIL=haldisoudani.freelancer@gmail.com
+GIT_COMMITTER_EMAIL=hamdisoudani.freelancer@gmail.com
 ```
 
 ## Execution environment
