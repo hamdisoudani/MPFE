@@ -359,6 +359,225 @@ Rough flow:
 
 ---
 
+
+---
+
+# Revision 2 — Information-gathering / clarification phase (2026-04-22)
+
+> **Scope:** adds a single new node, `clarify_with_user`, that pauses the graph to collect teacher preferences **after initial research, before the outline is generated**. Replaces the generic `interrupt()` TODO from R1.8e for this use case. The `needs_review` interrupt at `accept_lesson` is a separate, still-future use case.
+
+## R2.1 Why AFTER `search_planner` / `web_search`, not before
+
+Placing the clarifier *after* the research loop means the agent holds domain context (`findings`) when it asks. Consequences:
+
+- It can ask **informed** questions: "I found A1 English typically spans 10 chapters covering CEFR can-do statements — do you want to follow that standard, or focus narrowly on spoken conversation?"
+- It can **pre-fill sensible defaults** the teacher can accept with one click.
+- It can **skip** questions that the requirements already answer (e.g. teacher wrote "10-week course, 2h/week" — don't ask about duration).
+
+Cost: one extra LLM call + one interrupt before the user sees an outline. Mitigated by (a) defaults-on-by-default, (b) short question set (≤ 6 items), (c) a visible "Researching…" progress chip during the search loop so the wait feels productive.
+
+**Escape hatch:** if the initial `stream.submit()` already contains a `teacher_preferences` object (e.g. the teacher filled a form in the UI before chatting), `clarify_with_user` short-circuits — no LLM call, no interrupt. This keeps power-user and agent-driven paths both fast.
+
+## R2.2 `TeacherPreferences` contract (Pydantic)
+
+```python
+# agent/state.py
+from pydantic import BaseModel, Field, conint
+from typing import Literal
+
+class TeacherPreferences(BaseModel):
+    # --- Audience & pedagogy ---
+    target_audience: str = Field(..., description="Free-form: age group, prior level, context. e.g. 'Adult beginners, no prior English'.")
+    language_of_instruction: str = Field("English", description="Language the lessons are WRITTEN in (not the target language).")
+    pedagogical_approach: Literal["communicative", "grammar_translation", "task_based", "immersive", "mixed"] = "communicative"
+
+    # --- Structure ---
+    num_chapters: conint(ge=3, le=30) | None = Field(None, description="None = agent decides based on scope.")
+    lessons_per_chapter: conint(ge=1, le=12) | None = Field(None, description="None = agent decides per chapter.")
+    duration_weeks: conint(ge=1, le=52) | None = None
+    hours_per_week: float | None = None
+
+    # --- Activities & assessment ---
+    include_activities: bool = True
+    activity_granularity: Literal["per_lesson", "per_chapter", "end_of_course", "none"] = "per_lesson"
+    activity_types: list[Literal["quiz_mcq", "quiz_multi", "flashcards", "fill_blank", "short_answer"]] = ["quiz_mcq"]
+    assessment_frequency: Literal["none", "per_chapter", "mid_and_final", "per_lesson"] = "per_chapter"
+
+    # --- Emphasis ---
+    special_focus: list[str] = Field(default_factory=list, description="Free-form emphases, e.g. ['pronunciation', 'everyday conversation'].")
+    must_cover: list[str] = Field(default_factory=list, description="Topics the teacher insists on.")
+    must_avoid: list[str] = Field(default_factory=list, description="Topics to skip (e.g. 'no religious content').")
+```
+
+Mirror with a Zod schema on the frontend for the form.
+
+## R2.3 `ClarificationQuestions` contract (what the agent ASKS)
+
+The agent does not dump the whole `TeacherPreferences` schema on the teacher. It picks a short, targeted subset based on ambiguity in the request + findings. The LLM emits structured questions:
+
+```python
+class ClarificationField(BaseModel):
+    key: str                                # must be a valid TeacherPreferences field
+    prompt: str                             # question text shown to teacher
+    kind: Literal["single_choice", "multi_choice", "number", "text", "boolean"]
+    options: list[str] | None = None        # for *_choice
+    default: str | int | bool | list[str] | None = None
+    rationale: str | None = None            # why the agent is asking, grounded in findings
+
+class ClarificationQuestions(BaseModel):
+    questions: list[ClarificationField] = Field(..., max_length=6)
+    findings_summary: str = Field(..., description="2-3 sentences summarising what research found — shown above the form as context.")
+```
+
+The `key` field is constrained at validation time to the allow-list of `TeacherPreferences` fields.
+
+## R2.4 Node implementation
+
+```python
+# agent/nodes/clarify.py
+from langgraph.types import interrupt, Command
+from langgraph.config import get_stream_writer
+from agent.llm import small_llm
+from agent.state import TeacherPreferences, ClarificationQuestions
+
+async def clarify_with_user(state) -> Command:
+    # Short-circuit if the initial submit already carried preferences
+    if state.get("teacher_preferences") is not None:
+        return Command(goto="outline_generator", update={"phase": "outlining"})
+
+    llm = small_llm().with_structured_output(ClarificationQuestions)
+    findings_digest = _digest_findings(state["findings"])       # 1-2 KB max
+    questions = await llm.ainvoke([
+        SystemMessage(CLARIFY_SYSTEM_PROMPT),                    # instructs: ask <= 6 q's, prefer defaults, avoid re-asking answered things
+        HumanMessage(f"Requirements:\n{state['requirements']}\n\nFindings:\n{findings_digest}"),
+    ])
+
+    # Tell the UI a form is coming (ephemeral; does not hit the checkpoint as data)
+    get_stream_writer()({"event": "clarification_needed", "questions": questions.model_dump()})
+
+    # BLOCK the graph; the checkpointer persists the pending interrupt durably.
+    answers: dict = interrupt({
+        "kind": "clarification",
+        "questions": questions.model_dump(),
+    })
+
+    prefs = TeacherPreferences(**answers)
+    return Command(
+        goto="outline_generator",
+        update={"teacher_preferences": prefs, "phase": "outlining"},
+    )
+```
+
+Two things to note:
+1. `interrupt()` **persists the pending state via `AsyncPostgresSaver`**. If the teacher closes the tab and comes back 2 hours later, the form still shows up exactly where they left it.
+2. On resume, the whole node **re-runs** from the top (standard LangGraph semantics), so the short-circuit line handles resume naturally — the LLM is not called twice.
+
+## R2.5 State channel additions
+
+```python
+class SyllabusState(TypedDict):
+    # ... existing fields ...
+    teacher_preferences: TeacherPreferences | None   # None until clarify_with_user completes
+```
+
+Downstream nodes read `teacher_preferences` and branch on it:
+
+| Node | Reads | Effect |
+|---|---|---|
+| `outline_generator` | `num_chapters`, `lessons_per_chapter`, `pedagogical_approach`, `must_cover`, `must_avoid`, `special_focus`, `duration_weeks`, `hours_per_week` | Shapes the outline directly. |
+| `write_lesson` | `language_of_instruction`, `pedagogical_approach`, `special_focus` | Threaded into the writer system prompt. |
+| `critic_node` | `pedagogical_approach`, `must_cover`, `must_avoid` | Critic also checks against teacher constraints, not just general quality. |
+| `activities_generator` | `include_activities`, `activity_granularity`, `activity_types`, `assessment_frequency` | If `include_activities=False` or `activity_granularity="none"`, the node is **skipped** via conditional edge. `per_chapter` means activities emit at chapter end (lesson_id = NULL in the `activities` row — schema already supports this). |
+
+## R2.6 Graph topology update
+
+```
+search_planner ⇄ web_search  →  clarify_with_user  →  outline_generator  →  chapter_guard ⇄ (write_lesson → critic → accept → activities?) → END
+```
+
+Conditional edge after `accept_lesson`:
+
+```python
+def route_after_accept(state) -> str:
+    prefs = state["teacher_preferences"]
+    if not prefs.include_activities or prefs.activity_granularity == "none":
+        return "chapter_guard"
+    if prefs.activity_granularity == "per_lesson":
+        return "activities_generator"
+    # per_chapter: only emit on last lesson of chapter
+    if _is_last_lesson_in_chapter(state):
+        return "activities_generator"
+    return "chapter_guard"
+```
+
+## R2.7 Frontend: rendering the clarification form
+
+`useStream` exposes `.interrupt` as a first-class field. When it's set:
+
+```tsx
+// components/ClarifyForm.tsx
+const stream = useSyllabusStream(threadId);
+const ix = stream.interrupt;
+
+if (ix?.value?.kind === "clarification") {
+  return (
+    <ClarifyForm
+      findingsSummary={ix.value.questions.findings_summary}
+      questions={ix.value.questions.questions}
+      onSubmit={(answers) => {
+        // Resume the graph with the teacher's answers.
+        stream.submit(undefined, { command: { resume: answers } });
+      }}
+    />
+  );
+}
+```
+
+UX rules:
+- Render the 6 (or fewer) fields with defaults pre-filled.
+- "Accept defaults" button submits the form unchanged (one click).
+- Answers are validated with Zod mirroring `TeacherPreferences` before `stream.submit`.
+- While the form is open, the sidebar badge reads `awaiting input`. Supabase Realtime updates `syllabuses.phase = 'awaiting_input'` so other tabs/devices see the same state.
+
+New `phase` value: `awaiting_input`. Add it to the check constraint and to the `SyllabusPhase` TS enum.
+
+## R2.8 Bypass path for pre-filled forms
+
+If the product surface is a "Create syllabus" form (as opposed to pure chat), the frontend can send preferences at the first submit:
+
+```ts
+stream.submit({
+  messages: [{ type: "human", content: "Teach English A1" }],
+  requirements: "Teach English A1",
+  teacher_preferences: {
+    target_audience: "Adult beginners, no prior English",
+    num_chapters: 10, lessons_per_chapter: 3,
+    include_activities: true, activity_granularity: "per_lesson",
+    activity_types: ["quiz_mcq", "quiz_multi"],
+    pedagogical_approach: "communicative",
+    must_cover: ["numbers 1-100", "days of the week"],
+    must_avoid: [],
+    special_focus: ["everyday conversation"],
+  },
+});
+```
+
+`clarify_with_user` then short-circuits → no LLM call, no interrupt, straight to `outline_generator`.
+
+## R2.9 Schema addition (SQL migration)
+
+```sql
+alter table syllabuses
+  add column teacher_preferences jsonb;        -- mirror of TeacherPreferences for auditing/analytics
+alter table syllabuses
+  drop constraint if exists syllabuses_phase_check;
+alter table syllabuses
+  add  constraint syllabuses_phase_check
+       check (phase in ('searching','awaiting_input','outlining','writing','done','failed'));
+```
+
+`clarify_with_user` persists the finalized `TeacherPreferences` to this column immediately after the interrupt returns, so the row is the source of truth for analytics.
+
 # Original spec (historical — see Revision 1 above for current truth)
 
 # Syllabus Agent — Full Implementation Spec

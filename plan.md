@@ -126,3 +126,32 @@ Research source: `frontend-streaming-design.md` in this repo (distilled from `la
 ### Explicitly out of scope for v1
 - Dual-graph Planner/Programmer split (we keep one graph with supernodes).
 - Agent-inbox interrupt UI (single inline "review required" card is enough).
+
+
+## Revision 2 — Clarification phase (2026-04-22)
+
+Inserted a `clarify_with_user` node between the search loop and `outline_generator`. Full contract in `syllabus_agent_spec.md` § R2.
+
+**Why after search, not before:** the agent holds `findings` by the time it asks, so it can ask *informed* questions with sensible defaults instead of generic ones.
+
+**How it works**
+- New Pydantic contracts: `TeacherPreferences` (full shape) and `ClarificationQuestions` (the subset the agent actually asks, ≤ 6 items).
+- Node uses LangGraph 0.6 `interrupt({...})`. `AsyncPostgresSaver` persists the pause durably — teacher can close the tab and resume later.
+- Frontend reads `stream.interrupt.value.kind === "clarification"`, renders a form, resumes via `stream.submit(undefined, { command: { resume: answers } })`.
+- Short-circuit: if the initial `stream.submit()` already carries `teacher_preferences`, the node skips the LLM + interrupt entirely. Lets a "Create syllabus" form bypass chat-style clarification.
+
+**Downstream effects**
+- `outline_generator` uses `num_chapters` / `lessons_per_chapter` / `must_cover` / `must_avoid` / `special_focus` / duration.
+- `write_lesson` threads `language_of_instruction` + `pedagogical_approach` + `special_focus` into its system prompt.
+- `critic_node` also checks `must_cover` / `must_avoid` / `pedagogical_approach`.
+- `activities_generator` is now behind a conditional edge driven by `include_activities` + `activity_granularity`; `per_chapter` emits on the last lesson of the chapter only (and sets `lesson_id = NULL` on the activities row, which the schema already allows).
+
+**New artifacts**
+- `phase` enum gains `awaiting_input`.
+- `syllabuses.teacher_preferences jsonb` column (audit + analytics).
+- New frontend component `ClarifyForm` + Zod schema mirroring `TeacherPreferences`.
+
+**Updated topology**
+```
+search_planner ⇄ web_search → clarify_with_user → outline_generator → chapter_guard ⇄ (write_lesson → critic → accept → activities?) → END
+```
