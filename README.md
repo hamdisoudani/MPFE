@@ -42,7 +42,12 @@ An autonomous **Syllabus Agent**: a LangGraph (Python) orchestrator that, given 
 **All code execution for this project (tests, builds, lints, migrations, pushes, one-off scripts) runs inside an E2B sandbox.** The local/agent VM is only used to orchestrate; the sandbox is the real workspace.
 
 - **Template:** `desktop` — 8 vCPU, 8 GB RAM, Ubuntu-based, has Python 3.10, git, curl. Node/pnpm installed on demand per project.
-- **Persistence:** sandbox id is written to `.e2b_sandbox_id` (gitignored) so subsequent runs reconnect to the same VM instead of cold-starting a new one each time. Reconnect via `Sandbox.connect(sid)` from `@e2b/sdk` / `e2b` Python SDK.
+- **Reuse policy (in order):**
+  1. Call `Sandbox.list()` — if any RUNNING sandbox on the account has template `desktop`, reuse it. This is the authoritative check because the sandbox id in the repo can be stale.
+  2. Else try the id in `.e2b_sandbox.json` via `Sandbox.connect(sandbox_id)`.
+  3. Else `Sandbox.create(template="desktop", timeout=3600)`.
+- **Persistence:** `.e2b_sandbox.json` (committed — the id is useless without `E2B_API_KEY`) records `{sandbox_id, created_at, template}`. Acts as a hint across sessions; the `list()` call is the ground truth.
+- **Timeout:** default 1 h, bump per-job via `sbx.set_timeout(seconds)`. Max is whatever your E2B plan allows.
 - **Helper:** `scripts/e2b_sandbox.py` — `get_sandbox()` reconnects or creates, `python scripts/e2b_sandbox.py kill` tears it down.
 - **Credentials:** `E2B_API_KEY` and `GITHUB_PAT` are passed in per session, never committed. The agent will request them when needed.
 - **Verified SDK surface** (tested 2026-04-22 against `e2b` Python SDK):
