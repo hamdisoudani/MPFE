@@ -1,9 +1,10 @@
-"""write_lesson — honors lesson_plan requirements; injects prior critique on retries."""
+"""write_lesson — plan-contract aware; carries chapter.goal; injects critic report on retries."""
 from __future__ import annotations
 from pydantic import BaseModel
 from langgraph.types import Command
 from ..llm import writer_llm
 from ..db.supabase_client import supabase
+from ..prompts import writer_prompt
 
 class LessonDraft(BaseModel):
     title: str
@@ -15,6 +16,12 @@ def _find_plan(state: dict, substep_id: str):
         if p.get("substep_id") == substep_id:
             return p
     return None
+
+def _find_chapter_goal(state: dict, chapter_pos: int) -> str:
+    for c in state.get("chapters") or []:
+        if c.get("position") == chapter_pos:
+            return c.get("goal") or ""
+    return ""
 
 def write_lesson(state: dict) -> Command:
     sb = supabase()
@@ -33,40 +40,18 @@ def write_lesson(state: dict) -> Command:
     chapter = sb.table("chapters").select("*").eq("id", ch_id).single().execute().data
     substep_id = f"{state['syllabus_id']}::ch{chapter['position']}::l{next_pos}"
     plan = _find_plan(state, substep_id) or {}
+    chapter_goal = _find_chapter_goal(state, chapter["position"])
 
-    prior_critique = state.get("_critique") or ""
     prior_attempts = int(state.get("_draft_attempts") or 0)
     same = state.get("_draft_substep_id") == substep_id
-    revision_block = ""
-    if same and prior_attempts > 0 and prior_critique:
-        revision_block = (
-            f"\n\n### REVISION #{prior_attempts+1} — previous draft was REJECTED\n"
-            f"Critic feedback (address every item):\n{prior_critique}\n"
-            "Explicitly fix each issue. Preserve what worked."
-        )
-
-    plan_block = ""
-    if plan:
-        plan_block = (
-            f"\n\n### PLAN CONTRACT (you MUST satisfy all of these)\n"
-            f"- Planned title: {plan.get('title')}\n"
-            f"- Learning objective: {plan.get('learning_objective')}\n"
-            f"- must_cover (each item appears in the lesson): {plan.get('must_cover')}\n"
-            f"- Grammar focus: {plan.get('grammar_point')}\n"
-            f"- Vocabulary targets (include every item in the vocab list): {plan.get('vocab_targets')}\n"
-        )
+    prior_critique = state.get("_critique") if (same and prior_attempts > 0) else None
 
     llm = writer_llm().with_structured_output(LessonDraft)
-    draft: LessonDraft = llm.invoke(
-        f"Write lesson {next_pos} of chapter '{chapter['title']}' — {chapter['summary']}.\n"
-        f"Approach: {prefs.get('pedagogical_approach','mixed')}. "
-        f"Focus: {prefs.get('special_focus', [])}. Language: {prefs.get('language_of_instruction','English')}.\n"
-        f"Target audience: {prefs.get('target_audience','adult learners')}.\n"
-        "Structure: explicit objective line, grammar explanation, 3-5 dialogues/examples, vocabulary list, practice section."
-        + plan_block
-        + revision_block
-        + "\nReturn markdown."
-    )
+    draft: LessonDraft = llm.invoke(writer_prompt(
+        chapter=chapter, lesson_pos=next_pos, prefs=prefs, plan=plan,
+        chapter_goal=chapter_goal, prior_critique=prior_critique,
+        attempt_num=prior_attempts + 1,
+    ))
     return Command(goto="critic_node", update={
         "_draft": draft.model_dump(),
         "_draft_chapter_pos": chapter["position"],

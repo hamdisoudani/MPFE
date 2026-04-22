@@ -1,18 +1,21 @@
-"""outline_generator — chapters + per-lesson plans + per-activity plans with deps."""
+"""outline_generator — chapters with explicit GOAL + per-lesson plans + per-activity plans."""
 from __future__ import annotations
 from pydantic import BaseModel, Field
 from langgraph.types import Command
 from ..llm import writer_llm
 from ..db.supabase_client import supabase
+from ..prompts import outline_prompt
 
 class ChapterDraft(BaseModel):
     title: str
+    goal: str = Field(description="By the end of this chapter, the learner can …")
     summary: str
 
 class LessonPlanDraft(BaseModel):
     chapter_pos: int
     position: int
     title: str
+    serves_chapter_goal: str = ""
     learning_objective: str
     must_cover: list[str] = Field(default_factory=list)
     grammar_point: str = ""
@@ -21,9 +24,7 @@ class LessonPlanDraft(BaseModel):
 class ActivityPlanDraft(BaseModel):
     scope: str = Field(description="lesson or chapter")
     chapter_pos: int
-    depends_on_lesson_positions: list[int] = Field(
-        description="1-based lesson positions within the chapter this activity consolidates"
-    )
+    depends_on_lesson_positions: list[int]
     kind: str = "quiz"
     title: str
     instructions: str
@@ -34,6 +35,7 @@ class FullPlan(BaseModel):
     lesson_plans: list[LessonPlanDraft]
     activity_plans: list[ActivityPlanDraft]
 
+
 def outline_generator(state: dict) -> Command:
     prefs = state.get("teacher_preferences") or {}
     n = prefs.get("num_chapters", 10)
@@ -42,27 +44,24 @@ def outline_generator(state: dict) -> Command:
     include_activities = prefs.get("include_activities", True)
 
     llm = writer_llm().with_structured_output(FullPlan)
-    prompt = (
-        f"You are producing a rigorous teaching plan for this requirement:\n{state['requirements']}\n\n"
-        f"Teacher preferences: {prefs}\n\n"
-        f"Web findings (use these to ground real-world relevance, cite naturally in lessons):\n"
-        + "\n---\n".join(state.get("findings", [])[-15:])
-        + f"\n\nOutput EXACTLY:\n"
-        f"- {n} chapters with title+summary\n"
-        f"- {n*lpc} lesson_plans (every chapter {lpc} lessons), each with learning_objective, must_cover (3-5 concrete skills/facts), grammar_point, vocab_targets (6-12 items)\n"
-        f"- activity_plans: scope={granularity} (lesson => one activity per lesson covering that lesson; chapter => one activity per chapter consolidating ALL its lessons). "
-        f"depends_on_lesson_positions must list every lesson the activity covers. include_activities={include_activities}\n"
-        f"All positions are 1-based within their chapter."
-    )
-    plan: FullPlan = llm.invoke(prompt)
+    plan: FullPlan = llm.invoke(outline_prompt(
+        state["requirements"], prefs, state.get("findings", []),
+        n, lpc, granularity, include_activities,
+    ))
 
     sb = supabase()
-    rows = [{"syllabus_id": state["syllabus_id"], "position": i+1,
-             "title": c.title, "summary": c.summary, "status": "pending"}
-            for i, c in enumerate(plan.chapters[:n])]
+    rows = [{
+        "syllabus_id": state["syllabus_id"], "position": i+1,
+        "title": c.title,
+        "summary": f"Goal: {c.goal}\n\n{c.summary}",
+        "status": "pending",
+    } for i, c in enumerate(plan.chapters[:n])]
     resp = sb.table("chapters").upsert(rows, on_conflict="syllabus_id,position").execute()
     sb.table("syllabuses").update({"phase": "writing"}).eq("id", state["syllabus_id"]).execute()
-    chapters = [{"id": r["id"], "position": r["position"], "title": r["title"], "status": "pending"}
+
+    goals_by_pos = {i+1: c.goal for i, c in enumerate(plan.chapters[:n])}
+    chapters = [{"id": r["id"], "position": r["position"], "title": r["title"],
+                 "goal": goals_by_pos.get(r["position"], ""), "status": "pending"}
                 for r in resp.data]
 
     sid = state["syllabus_id"]
@@ -73,8 +72,11 @@ def outline_generator(state: dict) -> Command:
         lesson_plans.append({
             "substep_id": f"{sid}::ch{lp.chapter_pos}::l{lp.position}",
             "chapter_pos": lp.chapter_pos, "position": lp.position, "title": lp.title,
-            "learning_objective": lp.learning_objective, "must_cover": lp.must_cover,
-            "grammar_point": lp.grammar_point, "vocab_targets": lp.vocab_targets,
+            "serves_chapter_goal": lp.serves_chapter_goal or goals_by_pos.get(lp.chapter_pos, ""),
+            "learning_objective": lp.learning_objective,
+            "must_cover": lp.must_cover,
+            "grammar_point": lp.grammar_point,
+            "vocab_targets": lp.vocab_targets,
         })
 
     activity_plans = []
