@@ -86,3 +86,43 @@
 - **Never** couple the frontend to the LangGraph stream when Supabase Realtime already covers it — one source of truth.
 - **Never** use `MemorySaver` past the very first local smoke test — no resume, no durability.
 - Temporary routing state (`_critic_result`) leaks across checkpoints — use `Command` instead.
+
+---
+
+## Frontend streaming — Revision 1 (added 2026-04-22)
+
+Research source: `frontend-streaming-design.md` in this repo (distilled from `langchain-ai/open-swe` @ bd52e5e0~1 and `langchain-ai/agent-chat-ui`).
+
+### Decisions (authoritative)
+- Adopt `useStream` from `@langchain/langgraph-sdk/react` as the single SSE consumer for the active chat pane. Always pass `reconnectOnMount: true` and `fetchStateHistory: false`.
+- Two-track data plane:
+  - `useStream` for the active run's chat/messages + custom progress events.
+  - Supabase Realtime for structural artifacts (chapters/lessons/activities rows).
+  - SWR with tiered intervals (15 s sidebar / 3 s active-thread status) for thread list + status badges.
+- State channels split:
+  - `messages`: only user turns, one-sentence agent narration, tool-call summaries, interrupts. Trimmed with `RemoveMessage` at phase boundaries.
+  - `chapters` / `lessons` / `activities`: IDs + status only, with an **upsert-by-id reducer** (NOT `add`). Max 3 drafts per lesson = bounded growth.
+  - Everything large (lesson markdown, search snippets, tool payloads) lives in Supabase or LangGraph `BaseStore`, never in graph state.
+- Emit transient progress via `get_stream_writer()` and render as ephemeral chips via `onCustomEvent` — these never hit the checkpoint.
+- Nightly checkpoint pruning via `AsyncPostgresSaver.delete_thread()` for threads older than 30 days; keep only latest checkpoint for threads > 7 days.
+
+### Hooks to port from open-swe (1:1 unless noted)
+- [ ] `useThreadsSWR` (drop GitHub installation filter)
+- [ ] `useThreadStatus`
+- [ ] `useCancelStream`
+- [ ] `useDraftStorage`
+- [ ] thin `useSyllabusStream(threadId)` wrapper around `useStream<SyllabusState>`
+- [ ] `useJoinActiveRun(stream, runId)` helper (pattern from `thread-view.tsx` L187–240)
+- [ ] `useSyllabusStore(syllabusId)` Supabase Realtime subscription (new, not from open-swe)
+
+### UI perf checklist
+- [ ] Next.js 16 Server Component renders the thread shell; Client Component child mounts `useStream`.
+- [ ] `nuqs` drives `threadId` from the URL.
+- [ ] Prefetch `client.threads.get()` on sidebar hover.
+- [ ] Virtualize message list with `@tanstack/react-virtual` above ~50 messages.
+- [ ] `React.memo` on message bubbles + chapter/lesson cards with stable keys.
+- [ ] Zustand is for UI-only state (`activeThreadId`, `isGlobalPollingEnabled`). No server data mirrored into Zustand.
+
+### Explicitly out of scope for v1
+- Dual-graph Planner/Programmer split (we keep one graph with supernodes).
+- Agent-inbox interrupt UI (single inline "review required" card is enough).
