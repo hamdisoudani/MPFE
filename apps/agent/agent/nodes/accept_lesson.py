@@ -1,7 +1,6 @@
-"""accept_lesson — upsert lesson row, maybe run activities."""
+"""accept_lesson — persists lesson, clears draft scratchpad (GC), routes to activity scheduler."""
 from langgraph.types import Command
 from ..db.supabase_client import supabase
-
 
 def accept_lesson(state: dict) -> Command:
     draft = state["_draft"]
@@ -14,14 +13,13 @@ def accept_lesson(state: dict) -> Command:
         "title": draft["title"],
         "content_markdown": draft["content_markdown"],
         "summary": draft["summary"],
+        "needs_review": False,
+        "draft_attempts": int(state.get("_draft_attempts") or 0),
     }, on_conflict="substep_id").execute().data[0]
 
+    gc = {"_draft": None, "_draft_chapter_pos": None, "_draft_position": None,
+          "_draft_substep_id": None, "_draft_attempts": 0, "_critique": None}
     prefs = state.get("teacher_preferences") or {}
     if not prefs.get("include_activities", True):
-        return Command(goto="chapter_guard", update={"active_lesson_id": row["id"]})
-    granularity = prefs.get("activity_granularity", "per_lesson")
-    if granularity == "per_lesson":
-        return Command(goto="activities_generator", update={"active_lesson_id": row["id"]})
-    if granularity == "per_chapter" and state["_draft_position"] >= prefs.get("lessons_per_chapter", 3):
-        return Command(goto="activities_generator", update={"active_lesson_id": None})
-    return Command(goto="chapter_guard", update={"active_lesson_id": row["id"]})
+        return Command(goto="chapter_guard", update={**gc, "active_lesson_id": row["id"]})
+    return Command(goto="activities_generator", update={**gc, "active_lesson_id": row["id"]})

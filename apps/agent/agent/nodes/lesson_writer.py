@@ -1,4 +1,4 @@
-"""write_lesson — markdown output; honors special_focus + pedagogical_approach + prior critique."""
+"""write_lesson — honors lesson_plan requirements; injects prior critique on retries."""
 from __future__ import annotations
 from pydantic import BaseModel
 from langgraph.types import Command
@@ -10,6 +10,12 @@ class LessonDraft(BaseModel):
     content_markdown: str
     summary: str
 
+def _find_plan(state: dict, substep_id: str):
+    for p in state.get("lesson_plans") or []:
+        if p.get("substep_id") == substep_id:
+            return p
+    return None
+
 def write_lesson(state: dict) -> Command:
     sb = supabase()
     ch_id = state["active_chapter_id"]
@@ -20,24 +26,34 @@ def write_lesson(state: dict) -> Command:
     next_pos = (max([r["position"] for r in existing.data], default=0)) + 1
     if next_pos > lpc:
         sb.table("chapters").update({"status": "done"}).eq("id", ch_id).execute()
-        return Command(goto="chapter_guard", update={
+        return Command(goto="activities_generator", update={
             "chapters": [{"id": ch_id, "status": "done"}],
-            "active_chapter_id": None,
         })
 
     chapter = sb.table("chapters").select("*").eq("id", ch_id).single().execute().data
     substep_id = f"{state['syllabus_id']}::ch{chapter['position']}::l{next_pos}"
+    plan = _find_plan(state, substep_id) or {}
 
-    prior_critique = state.get("_critique") or {}
+    prior_critique = state.get("_critique") or ""
     prior_attempts = int(state.get("_draft_attempts") or 0)
-    same_substep = state.get("_draft_substep_id") == substep_id
+    same = state.get("_draft_substep_id") == substep_id
     revision_block = ""
-    if same_substep and prior_attempts > 0 and prior_critique:
-        issues = prior_critique.get("issues") or prior_critique.get("reasons") or prior_critique.get("feedback") or prior_critique
+    if same and prior_attempts > 0 and prior_critique:
         revision_block = (
-            f"\n\nThis is revision attempt #{prior_attempts + 1}. The previous draft was REJECTED by the critic.\n"
-            f"Critic feedback to address: {issues}\n"
-            "Explicitly fix every issue above. Keep what worked; rewrite what did not."
+            f"\n\n### REVISION #{prior_attempts+1} — previous draft was REJECTED\n"
+            f"Critic feedback (address every item):\n{prior_critique}\n"
+            "Explicitly fix each issue. Preserve what worked."
+        )
+
+    plan_block = ""
+    if plan:
+        plan_block = (
+            f"\n\n### PLAN CONTRACT (you MUST satisfy all of these)\n"
+            f"- Planned title: {plan.get('title')}\n"
+            f"- Learning objective: {plan.get('learning_objective')}\n"
+            f"- must_cover (each item appears in the lesson): {plan.get('must_cover')}\n"
+            f"- Grammar focus: {plan.get('grammar_point')}\n"
+            f"- Vocabulary targets (include every item in the vocab list): {plan.get('vocab_targets')}\n"
         )
 
     llm = writer_llm().with_structured_output(LessonDraft)
@@ -45,10 +61,11 @@ def write_lesson(state: dict) -> Command:
         f"Write lesson {next_pos} of chapter '{chapter['title']}' — {chapter['summary']}.\n"
         f"Approach: {prefs.get('pedagogical_approach','mixed')}. "
         f"Focus: {prefs.get('special_focus', [])}. Language: {prefs.get('language_of_instruction','English')}.\n"
-        "CEFR level A1: very short sentences, high-frequency vocabulary, present tense, 1 grammar point, "
-        "3-5 example dialogues, a vocabulary list of 8-12 items, and a short practice section. "
-        "Return markdown."
+        f"Target audience: {prefs.get('target_audience','adult learners')}.\n"
+        "Structure: explicit objective line, grammar explanation, 3-5 dialogues/examples, vocabulary list, practice section."
+        + plan_block
         + revision_block
+        + "\nReturn markdown."
     )
     return Command(goto="critic_node", update={
         "_draft": draft.model_dump(),
