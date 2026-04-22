@@ -35,3 +35,22 @@ An autonomous **Syllabus Agent**: a LangGraph (Python) orchestrator that, given 
 - Spec: [`syllabus_agent_spec.md`](./syllabus_agent_spec.md) — start by reading **§ Revision 1** at the top, it supersedes conflicting content below.
 - Progress log: [`plan.md`](./plan.md).
 - License: MIT.
+
+
+## Execution environment — E2B sandbox
+
+**All code execution for this project (tests, builds, lints, migrations, pushes, one-off scripts) runs inside an E2B sandbox.** The local/agent VM is only used to orchestrate; the sandbox is the real workspace.
+
+- **Template:** `desktop` — 8 vCPU, 8 GB RAM, Ubuntu-based, has Python 3.10, git, curl. Node/pnpm installed on demand per project.
+- **Persistence:** sandbox id is written to `.e2b_sandbox_id` (gitignored) so subsequent runs reconnect to the same VM instead of cold-starting a new one each time. Reconnect via `Sandbox.connect(sid)` from `@e2b/sdk` / `e2b` Python SDK.
+- **Helper:** `scripts/e2b_sandbox.py` — `get_sandbox()` reconnects or creates, `python scripts/e2b_sandbox.py kill` tears it down.
+- **Credentials:** `E2B_API_KEY` and `GITHUB_PAT` are passed in per session, never committed. The agent will request them when needed.
+- **Verified SDK surface** (tested 2026-04-22 against `e2b` Python SDK):
+  - `Sandbox.create(template="desktop", timeout=3600)` → new VM.
+  - `Sandbox.connect(sandbox_id)` → reattach.
+  - `sbx.commands.run(cmd, timeout=...)` → exec with stdout/stderr/exit code.
+  - `sbx.files.write(path, contents)` / `sbx.files.read(path)` → FS access.
+  - `sbx.set_timeout(sec)` → extend auto-kill timer.
+  - `sbx.get_info()` → `{cpu_count, memory_mb, state, started_at, end_at}`.
+  - `sbx.kill()` → shutdown (idempotent).
+- **Workflow:** `pnpm install`, `pnpm test`, `pnpm build`, `supabase db push`, `git push` — all run via `sbx.commands.run(...)`. Artifacts stay inside the sandbox FS between steps of the same session.
