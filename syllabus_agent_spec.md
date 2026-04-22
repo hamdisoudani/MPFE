@@ -1,3 +1,366 @@
+# Revision 1 — Authoritative Overrides (2026-04-22)
+
+> **READ THIS FIRST.** This section supersedes any conflicting content in the original spec below. The original spec is kept for historical context but when it disagrees with Revision 1, **Revision 1 wins**. The canonical running progress log is [`plan.md`](./plan.md).
+
+## R1.0 Summary of what changed
+
+| Area | Original spec | Revision 1 |
+|---|---|---|
+| Frontend framework | Next.js 14 | **Next.js 16.x** (App Router, React 19, Turbopack) |
+| LLM provider | Anthropic (Claude Sonnet 4) hard-coded | **3 OpenAI-compatible endpoints** via env: small / writer / critic |
+| Lesson storage | BlockNote JSON in DB, emitted by LLM | **Markdown** in DB, mapped to BlockNote on the frontend |
+| Frontend streaming | LangGraph SSE + Supabase Realtime | **Supabase Realtime only** (view-only frontend) |
+| DB tables | syllabuses / chapters / substeps / lessons | **syllabuses / chapters / lessons / activities** |
+| Cascades | implicit | **`ON DELETE CASCADE`** on every child row |
+| Realtime | lessons only | **Enabled on all 4 tables** |
+| RLS / auth | required | **Disabled for v1** (dev only, localhost) |
+| Critic routing | `_critic_result` temp state key + conditional edge | **`Command(goto=..., update=...)`** from inside `critic_node` |
+| Checkpointer | `MemorySaver` suggested | **`AsyncPostgresSaver`** against the same Supabase Postgres |
+| LangGraph version | `>= 0.2.50` | **`>= 0.6`** (Command, Store, get_stream_writer, interrupt, durable execution) |
+| Long-term memory | not mentioned | **`BaseStore`** stubbed via `InMemoryStore`, upgrade to `PostgresStore` later |
+| Human review | not wired | Reserved via **`interrupt()`** for `needs_review: true` lessons (TODO) |
+| Activities / quizzes | not in model | **New `activities` table + generator node** |
+| Search planner → web_search routing | `search_router` passthrough node | Direct conditional edges, no passthrough node |
+
+## R1.1 Tech stack (replaces § 3)
+
+```
+Agent:
+  - Python 3.11+
+  - langgraph >= 0.6
+  - langchain-openai            # OpenAI-compatible endpoints
+  - langchain-community         # search tools
+  - supabase-py
+  - pydantic v2
+  - httpx
+  - beautifulsoup4
+  - python-dotenv
+
+Frontend:
+  - Next.js 16.x (App Router, React 19, Turbopack)
+  - @supabase/supabase-js        # latest
+  - @blocknote/react @blocknote/core @blocknote/mantine   # latest (React 19 compatible)
+  - tailwindcss
+  - zustand v5
+  - typescript 5.7+
+
+External services:
+  - 3 OpenAI-compatible LLM endpoints (any mix of providers / self-hosted)
+  - Serper API (serper.dev)
+  - Supabase project (free tier)
+```
+
+## R1.2 `.env` contract (agent)
+
+```env
+# --- LLMs: three independent OpenAI-compatible endpoints ---
+# Cheap / fast — summarization, findings condensation
+LLM_SMALL_BASE_URL=
+LLM_SMALL_API_KEY=
+LLM_SMALL_MODEL=
+
+# Strong — writer + planner + activities
+LLM_WRITER_BASE_URL=
+LLM_WRITER_API_KEY=
+LLM_WRITER_MODEL=
+
+# Strong & adversarial — critic (MUST be a different model family than writer)
+LLM_CRITIC_BASE_URL=
+LLM_CRITIC_API_KEY=
+LLM_CRITIC_MODEL=
+
+# --- Services ---
+SERPER_API_KEY=
+
+# Supabase (REST for app code, Postgres URL for LangGraph checkpointer + Store)
+SUPABASE_URL=
+SUPABASE_SERVICE_ROLE_KEY=
+SUPABASE_DB_URL=postgresql://postgres:<password>@db.<project>.supabase.co:5432/postgres
+```
+
+`agent/llm.py`:
+
+```python
+from langchain_openai import ChatOpenAI
+import os, warnings
+
+def _mk(prefix: str, temperature: float) -> ChatOpenAI:
+    return ChatOpenAI(
+        base_url=os.environ[f"LLM_{prefix}_BASE_URL"],
+        api_key=os.environ[f"LLM_{prefix}_API_KEY"],
+        model=os.environ[f"LLM_{prefix}_MODEL"],
+        temperature=temperature,
+    )
+
+def small_llm():  return _mk("SMALL",  temperature=0.2)
+def writer_llm(): return _mk("WRITER", temperature=0.5)
+def critic_llm(): return _mk("CRITIC", temperature=0.0)
+
+if os.environ.get("LLM_WRITER_MODEL") == os.environ.get("LLM_CRITIC_MODEL"):
+    warnings.warn("Writer and critic use the same model. Self-critique is weak; use different model families.")
+```
+
+## R1.3 Database schema (replaces § 5 entirely)
+
+```sql
+create extension if not exists "uuid-ossp";
+
+-- SYLLABUSES ----------------------------------------------------------------
+create table syllabuses (
+  id uuid primary key default uuid_generate_v4(),
+  thread_id text unique not null,            -- LangGraph thread id (idempotent resume)
+  title text not null,
+  requirements text not null,
+  phase text not null default 'searching',   -- searching|outlining|writing|done|failed
+  phase_history jsonb not null default '[]', -- optional live timeline
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- CHAPTERS ------------------------------------------------------------------
+create table chapters (
+  id uuid primary key default uuid_generate_v4(),
+  syllabus_id uuid not null references syllabuses(id) on delete cascade,
+  position int not null,
+  title text not null,
+  summary text,
+  status text not null default 'pending',    -- pending|writing|done
+  created_at timestamptz not null default now(),
+  unique (syllabus_id, position)
+);
+
+-- LESSONS -------------------------------------------------------------------
+create table lessons (
+  id uuid primary key default uuid_generate_v4(),
+  chapter_id uuid not null references chapters(id) on delete cascade,
+  syllabus_id uuid not null references syllabuses(id) on delete cascade,
+  substep_id text not null,                  -- stable agent-side id for upsert
+  position int not null,
+  title text not null,
+  content_markdown text not null,            -- ← markdown, NOT BlockNote JSON
+  summary text,
+  draft_attempts int not null default 0,
+  needs_review boolean not null default false,
+  created_at timestamptz not null default now(),
+  unique (substep_id),
+  unique (chapter_id, position)
+);
+
+-- ACTIVITIES ----------------------------------------------------------------
+create table activities (
+  id uuid primary key default uuid_generate_v4(),
+  chapter_id uuid not null references chapters(id) on delete cascade,
+  lesson_id uuid references lessons(id) on delete cascade, -- nullable: chapter-level quiz
+  syllabus_id uuid not null references syllabuses(id) on delete cascade,
+  position int not null,
+  payload jsonb not null,                    -- ActivityPayload shape (see R1.4)
+  created_at timestamptz not null default now()
+);
+
+create index on chapters(syllabus_id);
+create index on lessons(chapter_id);
+create index on lessons(syllabus_id);
+create index on activities(lesson_id);
+create index on activities(chapter_id);
+
+-- Realtime (enable on all 4)
+alter publication supabase_realtime add table syllabuses;
+alter publication supabase_realtime add table chapters;
+alter publication supabase_realtime add table lessons;
+alter publication supabase_realtime add table activities;
+
+-- No RLS for v1. Anon key is localhost-only. Agent uses service_role key.
+```
+
+Cascades are deterministic: delete a syllabus → all chapters/lessons/activities gone. Delete a chapter → its lessons (and their activities) gone. Delete a lesson → its activities gone.
+
+## R1.4 Activities payload (Pydantic contract)
+
+```python
+# agent/state.py
+from pydantic import BaseModel, Field, conlist, conint
+
+class ActivityQuestion(BaseModel):
+    question: str
+    options: conlist(str, min_length=2, max_length=6)
+    correct_indices: conlist(conint(ge=0), min_length=1)  # supports multi-correct MCQ
+    explanation: str | None = None
+
+class ActivityPayload(BaseModel):
+    kind: str = Field(default="quiz")             # quiz | (future: flashcards, …)
+    title: str
+    questions: conlist(ActivityQuestion, min_length=1, max_length=20)
+```
+
+Mirror this shape with a Zod schema on the frontend.
+
+## R1.5 Lesson writer output — markdown, not BlockNote JSON (replaces § 7.8)
+
+```python
+class LessonContent(BaseModel):
+    summary: str = Field(..., description="1-2 sentence summary for agent context only.")
+    content_markdown: str = Field(..., description="GitHub-flavored markdown.")
+```
+
+Writer system prompt (markdown rules):
+
+> Output GitHub-flavored markdown ONLY. Allowed: `#`, `##`, `###` headings; paragraphs; `-` / `1.` lists; fenced code blocks with a language tag; `**bold**`, `*italic*`, `` `code` ``. Do NOT output raw HTML, tables, or images. Aim for 600–1200 words.
+
+The critic also consumes markdown directly. Delete the `blocks_to_text` helper from the original `critic.py`.
+
+## R1.6 Frontend: markdown → BlockNote at render time
+
+```ts
+// frontend/lib/lessonToBlocks.ts
+import { BlockNoteEditor } from "@blocknote/core";
+const editor = BlockNoteEditor.create();         // headless singleton
+export const markdownToBlocks = (md: string) => editor.tryParseMarkdownToBlocks(md);
+```
+
+Lesson view is a client component, read-only:
+
+```tsx
+const [blocks, setBlocks] = useState<Block[] | null>(null);
+useEffect(() => { markdownToBlocks(lesson.content_markdown).then(setBlocks); }, [lesson.content_markdown]);
+return blocks && <BlockNoteView editor={useCreateBlockNote({ initialContent: blocks })} editable={false} />;
+```
+
+## R1.7 Frontend: Supabase Realtime is the ONLY stream
+
+```ts
+// frontend/hooks/useSyllabusRealtime.ts
+export function useSyllabusRealtime(syllabusId: string) {
+  const store = useSyllabusStore();
+  useEffect(() => {
+    supabase.from("syllabuses")
+      .select("*, chapters(*, lessons(*), activities(*))")
+      .eq("id", syllabusId).single()
+      .then(({ data }) => store.hydrate(data));
+
+    const channel = supabase.channel(`syllabus:${syllabusId}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "syllabuses",
+          filter: `id=eq.${syllabusId}` },         p => store.applySyllabus(p))
+      .on("postgres_changes", { event: "*", schema: "public", table: "chapters",
+          filter: `syllabus_id=eq.${syllabusId}` }, p => store.applyChapter(p))
+      .on("postgres_changes", { event: "*", schema: "public", table: "lessons",
+          filter: `syllabus_id=eq.${syllabusId}` }, p => store.applyLesson(p))
+      .on("postgres_changes", { event: "*", schema: "public", table: "activities",
+          filter: `syllabus_id=eq.${syllabusId}` }, p => store.applyActivity(p))
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [syllabusId]);
+}
+```
+
+**Rule:** DB is truth. Zustand is a cache of rows keyed by id. No SSE, no second stream.
+
+## R1.8 LangGraph 0.6+ features we ARE using
+
+### a) `Command` for routing (replaces `_critic_result`)
+
+```python
+from langgraph.types import Command
+
+async def critic_node(state, config) -> Command:
+    result: CritiqueResult = await critic_llm_so.ainvoke([...])
+    attempts = state["active_substep"]["draft_attempts"]
+    passed   = result.pass_lesson
+    goto = "accept_lesson" if (passed or attempts >= 3) else "reject_lesson"
+    return Command(goto=goto, update={
+        "active_substep": { **state["active_substep"],
+                            "critique": result.critique,
+                            "improvement_points": result.improvement_points }
+    })
+```
+
+Delete `route_after_critic` and the `_critic_result` state key entirely.
+
+### b) `get_stream_writer` — server-side only
+
+Nodes emit structured events; a runner-side consumer persists them to `logs` / `phase_history` so the frontend sees them via Realtime.
+
+```python
+from langgraph.config import get_stream_writer
+
+def search_planner_node(state, config):
+    writer = get_stream_writer()
+    writer({"event": "search_plan_ready", "n_queries": len(plan.queries)})
+    ...
+```
+
+### c) `AsyncPostgresSaver` (Supabase Postgres as checkpointer)
+
+```python
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+
+checkpointer = AsyncPostgresSaver.from_conn_string(os.environ["SUPABASE_DB_URL"])
+await checkpointer.setup()                                     # idempotent
+graph = build_graph().compile(checkpointer=checkpointer, store=get_store())
+```
+
+### d) `BaseStore` for cross-thread memory (stub now, upgrade later)
+
+```python
+# agent/memory/store.py
+from langgraph.store.memory import InMemoryStore
+def get_store():
+    # TODO(prod): PostgresStore backed by SUPABASE_DB_URL once scraping volume justifies it.
+    return InMemoryStore()
+```
+
+Planned namespaces: `("scrapes", url_sha256)`, `("serper", query_sha256)`.
+
+### e) `interrupt()` — reserved for human review
+
+In `accept_lesson_node`, when `needs_review: true`:
+
+```python
+# TODO: human-in-the-loop review.
+# from langgraph.types import interrupt
+# decision = interrupt({"kind": "lesson_review", "lesson_id": lesson_id, "critique": ...})
+```
+
+Wire this up when the review UI exists. Not in v1.
+
+## R1.9 New node: activities generator
+
+Runs **after** `accept_lesson_node` (and only when the lesson is not `needs_review`). Structured output of `list[ActivityPayload]` (1–2 items). Upsert on `(lesson_id, position)`. Max 2 attempts, then move on and set `lessons.needs_review = true`.
+
+Rough flow:
+
+```
+... → accept_lesson → activities_generator → chapter_guard → ...
+```
+
+## R1.10 Graph topology cleanups
+
+- Delete the `search_router` passthrough node; attach `route_search` directly as a conditional edge off `search_planner` and `web_search`.
+- Same-model-family guard: at startup log a warning if `LLM_WRITER_MODEL == LLM_CRITIC_MODEL`.
+- All Supabase writes use `upsert(..., on_conflict=<unique_col>)`:
+  - syllabuses → `thread_id`
+  - chapters   → `syllabus_id,position`
+  - lessons    → `substep_id`
+  - activities → `lesson_id,position`
+
+## R1.11 Security posture (v1)
+
+- **No RLS, no auth.** Supabase anon key is localhost-only. Do not deploy publicly.
+- Agent writes use the **service role key** only.
+- Before any public deploy: enable RLS, add auth (Supabase Auth / Clerk), scope all rows by `owner_id`, rotate the service role key.
+
+## R1.12 Open items / backlog
+
+- Token / cost accounting columns on `syllabuses` (`input_tokens`, `output_tokens`, `usd_cost`).
+- `evaluations` table for critic pass-rate tracking.
+- `logs` table or `phase_history` timeline wired end-to-end (agent stream writer → runner consumer → Supabase → frontend).
+- Human review UI + `interrupt()` resume.
+- Eval harness (golden requirements → golden lessons).
+- `PostgresStore` swap-in for scrape/search caches.
+
+---
+
+# Original spec (historical — see Revision 1 above for current truth)
+
 # Syllabus Agent — Full Implementation Spec
 > Feed this document to a coding agent. Follow every section in order. Do not skip ahead.
 
