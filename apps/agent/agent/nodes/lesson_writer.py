@@ -5,12 +5,10 @@ from langgraph.types import Command
 from ..llm import writer_llm
 from ..db.supabase_client import supabase
 
-
 class LessonDraft(BaseModel):
     title: str
     content_markdown: str
     summary: str
-
 
 def write_lesson(state: dict) -> Command:
     sb = supabase()
@@ -22,7 +20,10 @@ def write_lesson(state: dict) -> Command:
     next_pos = (max([r["position"] for r in existing.data], default=0)) + 1
     if next_pos > lpc:
         sb.table("chapters").update({"status": "done"}).eq("id", ch_id).execute()
-        return Command(goto="chapter_guard")
+        return Command(goto="chapter_guard", update={
+            "chapters": [{"id": ch_id, "status": "done"}],
+            "active_chapter_id": None,
+        })
 
     chapter = sb.table("chapters").select("*").eq("id", ch_id).single().execute().data
     substep_id = f"{state['syllabus_id']}::ch{chapter['position']}::l{next_pos}"

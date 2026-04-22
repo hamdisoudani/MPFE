@@ -6,7 +6,6 @@ from langgraph.types import Command, interrupt
 from ..llm import small_llm
 from ..db.supabase_client import supabase
 
-
 class TeacherPreferences(BaseModel):
     target_audience: str = "Adult beginners"
     num_chapters: int = Field(default=10, ge=1, le=50)
@@ -20,7 +19,6 @@ class TeacherPreferences(BaseModel):
     language_of_instruction: str = "English"
     total_duration_hours: Optional[int] = None
 
-
 class ClarificationQuestion(BaseModel):
     key: str
     kind: Literal["text","number","single_choice","multi_choice","boolean"]
@@ -29,13 +27,11 @@ class ClarificationQuestion(BaseModel):
     default: object = None
     rationale: Optional[str] = None
 
-
 class ClarificationQuestions(BaseModel):
     findings_summary: str
     questions: list[ClarificationQuestion] = Field(max_length=6)
 
-
-def clarify_with_user(state: dict) -> Command:
+async def clarify_with_user(state: dict) -> Command:
     if state.get("teacher_preferences"):
         return Command(goto="outline_generator", update={"phase": "outlining"})
 
@@ -46,7 +42,7 @@ def clarify_with_user(state: dict) -> Command:
         "\n\nPropose up to 6 clarifying questions with sensible defaults. "
         "Keys must be fields of TeacherPreferences."
     )
-    qs: ClarificationQuestions = llm.invoke(prompt)
+    qs: ClarificationQuestions = await llm.ainvoke(prompt)
 
     sb = supabase()
     sb.table("syllabuses").update({"phase": "awaiting_input"}).eq("id", state["syllabus_id"]).execute()
