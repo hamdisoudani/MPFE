@@ -39,7 +39,7 @@ export function AgentPane({
     try {
       await stream.submit(
         { messages: [{ type: "human", content: text }] },
-        { streamMode: ["values", "messages-tuple", "custom"] }
+        { streamMode: ["values", "custom"] }
       );
     } catch (e) { console.error(e); }
   };
@@ -47,7 +47,7 @@ export function AgentPane({
   const submitClarify = async (answers: Record<string, unknown>) => {
     await stream.submit(undefined, {
       command: { resume: answers },
-      streamMode: ["values", "messages-tuple", "custom"],
+      streamMode: ["values", "custom"],
     });
   };
 
