@@ -36,7 +36,7 @@ export function AppShell() {
       setThreadId(created);
       refreshThreads();
     }
-  }, [stream, threadId, setThreadId, refreshThreads]);
+  }, [stream, (stream as any)?.threadId, (stream as any)?.thread?.thread_id, threadId, setThreadId, refreshThreads]);
 
   useEffect(() => {
     if (!toast) return;
@@ -50,8 +50,11 @@ export function AppShell() {
         { requirements },
         { streamMode: ["values", "custom"] }
       );
+      const s = stream as any;
+      const created = s?.threadId ?? s?.thread?.thread_id;
+      if (created) { setThreadId(created); refreshThreads(); }
     } catch (e) { console.error(e); setToast("Could not start the thread. Check the agent URL."); }
-  }, [stream]);
+  }, [stream, setThreadId, refreshThreads]);
 
   const inLanding = !threadId;
 
@@ -103,7 +106,7 @@ export function AppShell() {
       ) : (
         <main className="flex min-h-0 flex-1 flex-col md:flex-row">
           <section className="min-h-0 flex-1 overflow-y-auto border-b border-border dark:border-border-dark md:border-b-0 md:border-r">
-            <CenterPlan store={store} progress={progress} threadId={threadId ?? undefined} streaming={Boolean(stream?.isLoading)} />
+            <CenterPlan store={store} progress={progress} threadId={threadId ?? undefined} />
           </section>
           <section className="min-h-0 w-full shrink-0 md:w-[380px] lg:w-[420px]">
             <AgentPane

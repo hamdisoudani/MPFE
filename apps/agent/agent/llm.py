@@ -16,6 +16,8 @@ def _build(prefix: str, **kw) -> ChatOpenAI:
     return ChatOpenAI(
         base_url=base, api_key=key, model=model,
         temperature=kw.get("temperature", 0.2), timeout=60, max_retries=2,
+        tags=["langsmith:nostream"],
+        disable_streaming=True,
     )
 
 

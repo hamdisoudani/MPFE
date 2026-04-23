@@ -12,7 +12,7 @@ async function fetchThreads() {
 
 export function useThreadsSWR() {
   const { data, isLoading, error, mutate } = useSWR("langgraph-threads", fetchThreads, {
-    refreshInterval: 15_000,
+    refreshInterval: 8_000,
     revalidateOnFocus: true,
     keepPreviousData: true,
   });
