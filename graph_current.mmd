@@ -1,0 +1,19 @@
+flowchart TD
+    START([START]) --> self_awareness
+    self_awareness --> search_planner
+    search_planner -->|queries empty| web_search
+    search_planner -->|cursor >= N| clarify_with_user
+    web_search --> search_planner
+    clarify_with_user -->|interrupt + resume| outline_generator
+    outline_generator --> chapter_guard
+    chapter_guard -->|pending chapter| write_lesson
+    chapter_guard -->|all done| END([END])
+    write_lesson -->|lesson_pos > lpc| activities_generator
+    write_lesson --> critic_node
+    critic_node -->|passes| accept_lesson
+    critic_node -->|fails| reject_lesson
+    accept_lesson --> activities_generator
+    reject_lesson -->|attempt<3| write_lesson
+    reject_lesson -->|attempt>=3 force-accept| chapter_guard
+    activities_generator -->|more plans ready| activities_generator
+    activities_generator -->|none ready| chapter_guard

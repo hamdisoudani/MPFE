@@ -1,0 +1,16 @@
+flowchart TD
+    START([START]) --> self_awareness
+    self_awareness --> search_planner_parallel
+    search_planner_parallel -->|1 call, all queries| web_search_parallel
+    web_search_parallel -->|asyncio.gather 5 queries| clarify_with_user
+    clarify_with_user -->|interrupt + resume| outline_generator
+    outline_generator --> lesson_fanout
+    lesson_fanout -->|Send x N lessons| lesson_worker_1
+    lesson_fanout -->|Send x N lessons| lesson_worker_2
+    lesson_fanout -->|Send x N lessons| lesson_worker_N
+    lesson_worker_1 -->|write+critic+retry inline| join_lessons
+    lesson_worker_2 --> join_lessons
+    lesson_worker_N --> join_lessons
+    join_lessons --> activities_generator
+    activities_generator -->|more ready| activities_generator
+    activities_generator -->|none| END([END])
