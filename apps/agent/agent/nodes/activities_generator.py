@@ -1,11 +1,10 @@
-"""activities_generator — substep loop:
-  picks next pending activity_plan whose deps are all written, fetches dep lesson markdown,
-  generates a quiz/exercise, persists, marks plan done; loops; else -> chapter_guard."""
+"""activities_generator — substep loop with custom stream events."""
 from __future__ import annotations
 from pydantic import BaseModel, Field
 from langgraph.types import Command
 from ..llm import writer_llm
 from ..db.supabase_client import supabase
+from ..events import emit_activities_generated, emit_phase
 
 class Question(BaseModel):
     question: str
@@ -42,6 +41,7 @@ def activities_generator(state: dict) -> Command:
     if not plan:
         return Command(goto="chapter_guard")
 
+    emit_phase("activities")
     prefs = state.get("teacher_preferences") or {}
     ch = sb.table("chapters").select("id,title,summary,position") \
            .eq("syllabus_id", state["syllabus_id"]).eq("position", plan["chapter_pos"]).single().execute().data
@@ -63,13 +63,17 @@ def activities_generator(state: dict) -> Command:
         f"Questions must reference concrete phrases/vocab from the lessons.\n"
         f"---LESSONS---\n{deps_block}"
     )
+    lesson_id_for_activity = dep_lessons[0]["id"] if plan["scope"] == "lesson" else None
     sb.table("activities").insert({
         "chapter_id": ch["id"],
-        "lesson_id": dep_lessons[0]["id"] if plan["scope"] == "lesson" else None,
+        "lesson_id": lesson_id_for_activity,
         "syllabus_id": state["syllabus_id"],
         "position": len([p for p in state.get("activity_plans",[]) if p.get("status")=="done"]) + 1,
         "payload": payload.model_dump(),
     }).execute()
+
+    emit_activities_generated(chapter_id=ch["id"], lesson_id=lesson_id_for_activity,
+                              count=len(payload.questions))
 
     return Command(goto="activities_generator", update={
         "activity_plans": [{"substep_id": plan["substep_id"], "status": "done"}],

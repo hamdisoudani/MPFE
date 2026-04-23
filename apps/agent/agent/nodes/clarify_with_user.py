@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 from langgraph.types import Command, interrupt
 from ..llm import small_llm
 from ..db.supabase_client import supabase
+from ..events import emit_phase
 
 class TeacherPreferences(BaseModel):
     target_audience: str = "Adult beginners"
@@ -33,6 +34,7 @@ class ClarificationQuestions(BaseModel):
 
 async def clarify_with_user(state: dict) -> Command:
     if state.get("teacher_preferences"):
+        emit_phase("outlining")
         return Command(goto="outline_generator", update={"phase": "outlining"})
 
     llm = small_llm().with_structured_output(ClarificationQuestions)
@@ -46,6 +48,7 @@ async def clarify_with_user(state: dict) -> Command:
 
     sb = supabase()
     sb.table("syllabuses").update({"phase": "awaiting_input"}).eq("id", state["syllabus_id"]).execute()
+    emit_phase("awaiting_input")
 
     answers = interrupt({
         "kind": "clarification",
@@ -58,6 +61,7 @@ async def clarify_with_user(state: dict) -> Command:
         "phase": "outlining",
         "teacher_preferences": prefs.model_dump(),
     }).eq("id", state["syllabus_id"]).execute()
+    emit_phase("outlining")
 
     return Command(goto="outline_generator", update={
         "teacher_preferences": prefs.model_dump(),

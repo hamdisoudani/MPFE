@@ -1,7 +1,8 @@
 """web_search — real Serper API; falls back to stub if key missing."""
 from __future__ import annotations
-import os, json, httpx
+import os, httpx
 from langgraph.types import Command
+from ..events import emit_search_progress, emit_error
 
 def web_search(state: dict) -> Command:
     queries = state.get("search_queries", [])
@@ -21,17 +22,22 @@ def web_search(state: dict) -> Command:
             )
             data = r.json()
             for item in (data.get("organic") or [])[:5]:
-                title = item.get("title", "").strip()
-                snip = item.get("snippet", "").strip()
-                link = item.get("link", "").strip()
+                title = (item.get("title") or "").strip()
+                snip = (item.get("snippet") or "").strip()
+                link = (item.get("link") or "").strip()
                 if title or snip:
                     findings.append(f"Q: {q}\nT: {title}\nS: {snip}\nU: {link}")
             if (kg := data.get("knowledgeGraph")) and kg.get("description"):
                 findings.append(f"Q: {q}\nKG: {kg.get('title','')} — {kg['description']}")
         except Exception as e:
+            emit_error("web_search", str(e))
             findings.append(f"Q: {q}\n[search_error] {e}")
     else:
         findings.append(f"Q: {q}\n[stub] no SERPER_API_KEY set")
+
+    total_findings = len(state.get("findings", [])) + len(findings)
+    emit_search_progress(queries_done=cursor + 1, queries_total=len(queries), findings=total_findings)
+
     return Command(goto="search_planner", update={
         "search_cursor": cursor + 1,
         "findings": findings,

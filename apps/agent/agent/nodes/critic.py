@@ -1,10 +1,10 @@
-"""critic_node — evidence-based; per-criterion quotes; emits full report to state."""
+"""critic_node — evidence-based; per-criterion quotes; emits full report + custom event."""
 from __future__ import annotations
 import json, re
 from langgraph.types import Command
 from ..llm import critic_llm
 from ..prompts import critic_prompt
-
+from ..events import emit_critic_verdict, emit_lesson_attempt
 
 def _find_plan(state: dict, substep_id: str):
     for p in state.get("lesson_plans") or []:
@@ -28,7 +28,6 @@ def _parse(text: str) -> dict:
             "per_criterion": [], "score": 0, "weaknesses": ["unparseable critic response"]}
 
 def _enforce(verdict: dict, plan: dict) -> dict:
-    """Re-verify hard rules client-side — model may still try to rubber-stamp."""
     pc = verdict.get("per_criterion") or []
     by_id = {c.get("id"): c for c in pc if isinstance(c, dict)}
 
@@ -60,12 +59,18 @@ def _enforce(verdict: dict, plan: dict) -> dict:
     verdict["passes"] = bool(score >= 5 and c3_ok and c5_ok)
     return verdict
 
-
 def critic_node(state: dict) -> Command:
     draft = state["_draft"]
     prefs = state.get("teacher_preferences") or {}
-    plan = _find_plan(state, state.get("_draft_substep_id","")) or {}
-    chapter_goal = _find_chapter_goal(state, state.get("_draft_chapter_pos") or 0)
+    substep_id = state.get("_draft_substep_id","")
+    chapter_pos = state.get("_draft_chapter_pos") or 0
+    position = state.get("_draft_position") or 0
+    attempt = int(state.get("_draft_attempts") or 0) + 1
+    plan = _find_plan(state, substep_id) or {}
+    chapter_goal = _find_chapter_goal(state, chapter_pos)
+
+    emit_lesson_attempt(lesson_substep_id=substep_id, chapter_pos=chapter_pos,
+                        position=position, attempt=attempt, status="critiquing")
 
     prompt = critic_prompt(
         lesson_markdown=draft.get("content_markdown") or "",
@@ -81,14 +86,18 @@ def critic_node(state: dict) -> Command:
     verdict = _enforce(verdict, plan)
 
     report = {
-        "substep_id": state.get("_draft_substep_id"),
-        "attempt": int(state.get("_draft_attempts") or 0) + 1,
+        "substep_id": substep_id,
+        "attempt": attempt,
         "score": int(verdict.get("score") or 0),
         "passes": bool(verdict.get("passes")),
         "per_criterion": verdict.get("per_criterion") or [],
         "weaknesses": verdict.get("weaknesses") or [],
         "critique": verdict.get("critique") or "",
     }
+
+    emit_critic_verdict(lesson_substep_id=substep_id, attempt=attempt,
+                        passes=report["passes"], score=report["score"],
+                        weaknesses=report["weaknesses"])
 
     crit_for_writer = json.dumps({
         "score": report["score"],

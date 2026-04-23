@@ -1,0 +1,35 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root { color-scheme: light dark; }
+  html, body { height: 100%; }
+  body {
+    @apply bg-bg text-fg font-sans antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+  .dark body { @apply bg-bg-dark text-fg-dark; }
+}
+
+@layer components {
+  .panel { @apply bg-panel dark:bg-panel-dark border border-border dark:border-border-dark rounded-2xl; }
+  .chip  { @apply inline-flex items-center gap-1.5 rounded-full border border-border dark:border-border-dark
+           px-2.5 py-0.5 text-xs font-medium text-fg-muted bg-panel dark:bg-panel-dark; }
+  .chip-accent { @apply chip border-accent/30 text-accent bg-accent-soft dark:bg-accent/10; }
+  .chip-warn   { @apply chip border-warn/40 text-warn bg-warn-soft dark:bg-warn/10; }
+  .chip-err    { @apply chip border-err/40  text-err  bg-err-soft  dark:bg-err/10; }
+  .dot         { @apply inline-block w-1.5 h-1.5 rounded-full bg-current animate-pulse-dot; }
+  .btn         { @apply inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm
+                 font-medium transition disabled:opacity-50 disabled:cursor-not-allowed
+                 border border-border dark:border-border-dark hover:bg-bg dark:hover:bg-bg-dark; }
+  .btn-primary { @apply btn bg-accent text-accent-fg border-accent hover:brightness-110; }
+  .btn-ghost   { @apply btn border-transparent; }
+  .input       { @apply w-full rounded-xl border border-border dark:border-border-dark bg-panel
+                 dark:bg-panel-dark px-3 py-2 text-sm outline-none focus:border-accent
+                 focus:ring-2 focus:ring-accent/20; }
+}
+
+@layer utilities {
+  .scrollbar-thin { scrollbar-width: thin; }
+}
