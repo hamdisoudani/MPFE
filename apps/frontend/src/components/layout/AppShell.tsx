@@ -30,12 +30,13 @@ export function AppShell() {
 
   // When useStream auto-creates a thread, sync its id into the URL.
   useEffect(() => {
-    const created = stream?.thread?.thread_id ?? stream?.threadId;
+    const s = stream as any;
+    const created = s?.thread?.thread_id ?? s?.threadId ?? s?.values?._thread_id;
     if (!threadId && created) {
       setThreadId(created);
       refreshThreads();
     }
-  }, [stream?.thread?.thread_id, stream?.threadId, threadId, setThreadId, refreshThreads]);
+  }, [stream, threadId, setThreadId, refreshThreads]);
 
   useEffect(() => {
     if (!toast) return;
