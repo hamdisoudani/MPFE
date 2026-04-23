@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>MPFE Syllabus Agent — Graph Simulation</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background:#0f172a; color:#e2e8f0; }
+  header { padding: 20px 32px; border-bottom:1px solid #334155; background:#1e293b; }
+  h1 { margin:0; font-size:22px; color:#f1f5f9; }
+  .sub { color:#94a3b8; font-size:14px; margin-top:4px; }
+  .tabs { display:flex; gap:8px; padding: 16px 32px 0; }
+  .tab { padding:10px 18px; background:#1e293b; border:1px solid #334155; border-bottom:none; border-radius:8px 8px 0 0; cursor:pointer; color:#cbd5e1; font-weight:600; }
+  .tab.active { background:#0ea5e9; color:white; border-color:#0ea5e9; }
+  .panel { display:none; padding:24px 32px; background:#1e293b; border:1px solid #334155; margin:0 32px 32px; border-radius:0 12px 12px 12px; }
+  .panel.active { display:block; }
+  .controls { display:flex; gap:12px; margin-bottom:20px; align-items:center; flex-wrap:wrap; }
+  button { padding:10px 20px; background:#0ea5e9; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600; font-size:14px; }
+  button:hover { background:#0284c7; }
+  button:disabled { background:#475569; cursor:not-allowed; }
+  .speed { color:#cbd5e1; }
+  select { padding:8px 12px; background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:6px; }
+  .mermaid { background:white; padding:24px; border-radius:12px; min-height:500px; }
+  .log { margin-top:20px; background:#0f172a; padding:16px; border-radius:8px; border:1px solid #334155; max-height:260px; overflow-y:auto; font-family: 'SF Mono', Consolas, monospace; font-size:13px; }
+  .log-entry { padding:6px 10px; margin-bottom:4px; border-left:3px solid #0ea5e9; background:#1e293b; border-radius:4px; }
+  .log-entry.done { border-left-color:#10b981; }
+  .log-entry.parallel { border-left-color:#a855f7; }
+  .log-entry.critic { border-left-color:#eab308; }
+  .log-entry.end { border-left-color:#ef4444; }
+  .log-time { color:#64748b; font-size:11px; }
+  .stats { display:grid; grid-template-columns: repeat(4, 1fr); gap:12px; margin-bottom:20px; }
+  .stat { background:#0f172a; padding:14px; border-radius:8px; border:1px solid #334155; }
+  .stat .label { font-size:11px; color:#94a3b8; text-transform:uppercase; letter-spacing:0.05em; }
+  .stat .value { font-size:22px; font-weight:700; color:#0ea5e9; margin-top:4px; }
+  .legend { display:flex; gap:16px; flex-wrap:wrap; font-size:12px; color:#cbd5e1; margin-top:12px;}
+  .legend span { display:inline-flex; align-items:center; gap:6px; }
+  .swatch { width:16px; height:16px; border-radius:4px; display:inline-block; border:1px solid #334155; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🎓 MPFE Syllabus Agent — Interactive Graph Simulation</h1>
+  <div class="sub">Toggle between current vs optimized topology · Run simulated traces with timing · Watch nodes light up as they execute</div>
+</header>
+
+<div class="tabs">
+  <div class="tab active" data-tab="current">Current (Sequential) — 259s</div>
+  <div class="tab" data-tab="optimized">Optimized (Parallel Send) — 83s · 2.93× ⚡</div>
+  <div class="tab" data-tab="compare">Side-by-Side</div>
+</div>
+
+<div class="panel active" id="panel-current">
+  <div class="controls">
+    <button onclick="simulate('current')" id="btn-current">▶ Simulate Run</button>
+    <button onclick="resetGraph('current')">⟲ Reset</button>
+    <span class="speed">Speed: </span>
+    <select id="speed-current"><option value="1">1×</option><option value="2" selected>2×</option><option value="5">5×</option><option value="10">10×</option></select>
+  </div>
+  <div class="stats">
+    <div class="stat"><div class="label">Phase 2 Time</div><div class="value">259 s</div></div>
+    <div class="stat"><div class="label">LLM Calls</div><div class="value">~18</div></div>
+    <div class="stat"><div class="label">Serper Calls</div><div class="value">5 serial</div></div>
+    <div class="stat"><div class="label">Lesson Workers</div><div class="value">1 (serial)</div></div>
+  </div>
+  <div class="mermaid" id="mer-current">
+flowchart TD
+    START([🟢 START]):::startn --> self_awareness
+    self_awareness[self_awareness<br/><i>detect missing inputs</i>] --> search_planner
+    search_planner{search_planner<br/><i>plan one query at a time</i>}:::plan
+    search_planner -->|queries ready| web_search[web_search<br/><i>Serper call</i>]:::search
+    web_search -->|"loop: cursor++"| search_planner
+    search_planner -->|cursor ≥ N| clarify_with_user[clarify_with_user<br/><i>interrupt + HITL</i>]:::pause
+    clarify_with_user -->|resume| outline_generator[outline_generator<br/><i>chapters + lesson plans</i>]
+    outline_generator --> chapter_guard{chapter_guard}:::guard
+    chapter_guard -->|pending chapter| write_lesson[write_lesson<br/><i>LLM generates lesson</i>]:::work
+    chapter_guard -->|all done| END_node([🔴 END]):::endn
+    write_lesson --> critic_node{critic_node<br/><i>rubric check</i>}:::critic
+    critic_node -->|pass| accept_lesson[accept_lesson]:::ok
+    critic_node -->|fail| reject_lesson[reject_lesson]:::bad
+    accept_lesson --> activities_generator[activities_generator<br/><i>quiz per chapter</i>]
+    reject_lesson -->|attempt &lt; 3| write_lesson
+    reject_lesson -->|force-accept| chapter_guard
+    activities_generator -->|more plans| activities_generator
+    activities_generator -->|none ready| chapter_guard
+    classDef startn fill:#86efac,stroke:#166534,stroke-width:2px,color:#14532d;
+    classDef endn fill:#fca5a5,stroke:#991b1b,stroke-width:2px,color:#7f1d1d;
+    classDef plan fill:#bfdbfe,stroke:#1e40af;
+    classDef search fill:#bae6fd,stroke:#0369a1;
+    classDef pause fill:#fde68a,stroke:#92400e;
+    classDef guard fill:#e9d5ff,stroke:#6b21a8;
+    classDef work fill:#ddd6fe,stroke:#5b21b6;
+    classDef critic fill:#fef08a,stroke:#a16207;
+    classDef ok fill:#bbf7d0,stroke:#15803d;
+    classDef bad fill:#fecaca,stroke:#b91c1c;
+  </div>
+  <div class="log" id="log-current"></div>
+</div>
+
+<div class="panel" id="panel-optimized">
+  <div class="controls">
+    <button onclick="simulate('optimized')" id="btn-optimized">▶ Simulate Run</button>
+    <button onclick="resetGraph('optimized')">⟲ Reset</button>
+    <span class="speed">Speed: </span>
+    <select id="speed-optimized"><option value="1">1×</option><option value="2" selected>2×</option><option value="5">5×</option><option value="10">10×</option></select>
+  </div>
+  <div class="stats">
+    <div class="stat"><div class="label">Phase 2 Time</div><div class="value">83 s</div></div>
+    <div class="stat"><div class="label">LLM Calls</div><div class="value">~12</div></div>
+    <div class="stat"><div class="label">Serper Calls</div><div class="value">5 parallel</div></div>
+    <div class="stat"><div class="label">Lesson Workers</div><div class="value">N parallel (Send)</div></div>
+  </div>
+  <div class="mermaid" id="mer-optimized">
+flowchart TD
+    START([🟢 START]):::startn --> self_awareness
+    self_awareness[self_awareness] --> search_planner_parallel[search_planner_once<br/><i>1 LLM call → all queries</i>]:::parallel
+    search_planner_parallel -->|plan list| web_search_parallel[web_search_parallel<br/><i>asyncio.gather N queries</i>]:::parallel
+    web_search_parallel -->|findings[]| clarify_with_user[clarify_with_user]:::pause
+    clarify_with_user -->|resume| outline_generator[outline_generator]
+    outline_generator --> lesson_fanout[lesson_fanout<br/><i>emits Send×N</i>]:::join
+    lesson_fanout -.->|Send 1| w1[lesson_worker #1<br/><i>write+critic+retry</i>]:::parallel
+    lesson_fanout -.->|Send 2| w2[lesson_worker #2<br/><i>write+critic+retry</i>]:::parallel
+    lesson_fanout -.->|Send N| w3[lesson_worker #N<br/><i>write+critic+retry</i>]:::parallel
+    w1 --> join_lessons[join_lessons<br/><i>barrier</i>]:::join
+    w2 --> join_lessons
+    w3 --> join_lessons
+    join_lessons --> activities_generator[activities_generator]
+    activities_generator -->|more| activities_generator
+    activities_generator -->|none| finalize[finalize<br/><i>phase=done</i>]:::ok
+    finalize --> END_node([🔴 END]):::endn
+    classDef startn fill:#86efac,stroke:#166534,stroke-width:2px;
+    classDef endn fill:#fca5a5,stroke:#991b1b,stroke-width:2px;
+    classDef parallel fill:#ddd6fe,stroke:#5b21b6,stroke-width:2px;
+    classDef pause fill:#fde68a,stroke:#92400e;
+    classDef join fill:#a7f3d0,stroke:#047857,stroke-width:2px;
+    classDef ok fill:#bbf7d0,stroke:#15803d;
+  </div>
+  <div class="log" id="log-optimized"></div>
+</div>
+
+<div class="panel" id="panel-compare">
+  <h3 style="margin-top:0">Architecture Comparison</h3>
+  <table style="width:100%;border-collapse:collapse;">
+    <thead><tr style="background:#0f172a">
+      <th style="text-align:left;padding:10px;border:1px solid #334155">Aspect</th>
+      <th style="text-align:left;padding:10px;border:1px solid #334155">Current</th>
+      <th style="text-align:left;padding:10px;border:1px solid #334155">Optimized</th>
+      <th style="text-align:left;padding:10px;border:1px solid #334155">Gain</th>
+    </tr></thead>
+    <tbody>
+      <tr><td style="padding:10px;border:1px solid #334155">Search planning</td><td style="padding:10px;border:1px solid #334155">N LLM calls (1 per query, cursor loop)</td><td style="padding:10px;border:1px solid #334155">1 LLM call returning all queries</td><td style="padding:10px;border:1px solid #334155;color:#10b981">~N×</td></tr>
+      <tr><td style="padding:10px;border:1px solid #334155">Web search</td><td style="padding:10px;border:1px solid #334155">Serial Serper calls via cursor</td><td style="padding:10px;border:1px solid #334155">asyncio.gather parallel fan-out</td><td style="padding:10px;border:1px solid #334155;color:#10b981">~3× on 5 queries</td></tr>
+      <tr><td style="padding:10px;border:1px solid #334155">Lesson writing</td><td style="padding:10px;border:1px solid #334155">Sequential write → critic → accept/reject loop per lesson</td><td style="padding:10px;border:1px solid #334155">Send fan-out: N workers run write+critic+retry in parallel</td><td style="padding:10px;border:1px solid #334155;color:#10b981">~3× on 6 lessons</td></tr>
+      <tr><td style="padding:10px;border:1px solid #334155">Phase 2 total</td><td style="padding:10px;border:1px solid #334155"><b>259 s</b></td><td style="padding:10px;border:1px solid #334155"><b>83 s</b></td><td style="padding:10px;border:1px solid #334155;color:#10b981"><b>2.93×</b></td></tr>
+      <tr><td style="padding:10px;border:1px solid #334155">State size</td><td style="padding:10px;border:1px solid #334155">43.5 KB</td><td style="padding:10px;border:1px solid #334155">39.6 KB</td><td style="padding:10px;border:1px solid #334155;color:#10b981">−9%</td></tr>
+      <tr><td style="padding:10px;border:1px solid #334155">Topology</td><td style="padding:10px;border:1px solid #334155">Linear with critic retry loop</td><td style="padding:10px;border:1px solid #334155">Fan-out/fan-in via LangGraph <code>Send</code></td><td style="padding:10px;border:1px solid #334155">—</td></tr>
+    </tbody>
+  </table>
+  <div class="legend" style="margin-top:24px">
+    <span><span class="swatch" style="background:#86efac"></span>START</span>
+    <span><span class="swatch" style="background:#fca5a5"></span>END</span>
+    <span><span class="swatch" style="background:#ddd6fe"></span>Parallel node</span>
+    <span><span class="swatch" style="background:#a7f3d0"></span>Fan-out / Join</span>
+    <span><span class="swatch" style="background:#fef08a"></span>Critic</span>
+    <span><span class="swatch" style="background:#fde68a"></span>HITL pause</span>
+  </div>
+</div>
+
+<script>
+mermaid.initialize({startOnLoad:true, theme:'default', flowchart:{curve:'basis', nodeSpacing:55, rankSpacing:55}, themeVariables:{fontSize:'15px'}});
+
+document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
+  document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(x => x.classList.remove('active'));
+  t.classList.add('active');
+  document.getElementById('panel-' + t.dataset.tab).classList.add('active');
+}));
+
+function log(which, msg, cls='') {
+  const el = document.getElementById('log-'+which);
+  const t = new Date().toISOString().substr(11,12);
+  const e = document.createElement('div');
+  e.className = 'log-entry ' + cls;
+  e.innerHTML = '<span class="log-time">'+t+'</span> &nbsp; ' + msg;
+  el.appendChild(e); el.scrollTop = el.scrollHeight;
+}
+
+function highlight(which, nodeText, color='#fbbf24') {
+  const svg = document.querySelector('#mer-'+which+' svg');
+  if (!svg) return;
+  svg.querySelectorAll('g.node').forEach(g => {
+    const txt = g.textContent || '';
+    if (txt.includes(nodeText)) {
+      const shape = g.querySelector('rect, polygon, path, circle');
+      if (shape) { shape.style.filter = 'drop-shadow(0 0 12px '+color+')'; shape.style.stroke = color; shape.style.strokeWidth = '3px'; }
+    }
+  });
+}
+
+function markDone(which, nodeText) {
+  const svg = document.querySelector('#mer-'+which+' svg');
+  if (!svg) return;
+  svg.querySelectorAll('g.node').forEach(g => {
+    const txt = g.textContent || '';
+    if (txt.includes(nodeText)) {
+      const shape = g.querySelector('rect, polygon, path, circle');
+      if (shape) { shape.style.filter = 'drop-shadow(0 0 6px #10b981)'; shape.style.stroke = '#10b981'; }
+    }
+  });
+}
+
+function resetGraph(which) {
+  document.getElementById('log-'+which).innerHTML = '';
+  const svg = document.querySelector('#mer-'+which+' svg');
+  if (!svg) return;
+  svg.querySelectorAll('g.node').forEach(g => {
+    const shape = g.querySelector('rect, polygon, path, circle');
+    if (shape) { shape.style.filter = ''; shape.style.stroke = ''; shape.style.strokeWidth = ''; }
+  });
+}
+
+const currentTrace = [
+  {node:'START', time:0, msg:'🟢 Start pipeline', cls:'done'},
+  {node:'self_awareness', time:200, msg:'self_awareness: detect missing fields'},
+  {node:'search_planner', time:800, msg:'search_planner: plan query 1/5'},
+  {node:'web_search', time:600, msg:'web_search: Serper call 1/5', cls:'parallel'},
+  {node:'search_planner', time:700, msg:'search_planner: plan query 2/5'},
+  {node:'web_search', time:600, msg:'web_search: Serper call 2/5'},
+  {node:'search_planner', time:700, msg:'search_planner: plan query 3/5'},
+  {node:'web_search', time:600, msg:'web_search: Serper call 3/5'},
+  {node:'search_planner', time:700, msg:'search_planner: plan query 4/5'},
+  {node:'web_search', time:600, msg:'web_search: Serper call 4/5'},
+  {node:'search_planner', time:700, msg:'search_planner: plan query 5/5'},
+  {node:'web_search', time:600, msg:'web_search: Serper call 5/5'},
+  {node:'clarify_with_user', time:300, msg:'⏸ clarify_with_user: HITL resumed'},
+  {node:'outline_generator', time:2500, msg:'outline_generator: 3 chapters × 2 lessons'},
+  {node:'chapter_guard', time:100, msg:'chapter_guard → Ch1'},
+  {node:'write_lesson', time:3000, msg:'write_lesson Ch1-L1'},
+  {node:'critic_node', time:1500, msg:'critic_node: pass ✔', cls:'critic'},
+  {node:'accept_lesson', time:200, msg:'accept_lesson Ch1-L1', cls:'done'},
+  {node:'write_lesson', time:3200, msg:'write_lesson Ch1-L2'},
+  {node:'critic_node', time:1500, msg:'critic_node: pass ✔', cls:'critic'},
+  {node:'accept_lesson', time:200, msg:'accept_lesson Ch1-L2', cls:'done'},
+  {node:'activities_generator', time:2200, msg:'activities_generator Ch1'},
+  {node:'chapter_guard', time:100, msg:'chapter_guard → Ch2'},
+  {node:'write_lesson', time:3000, msg:'write_lesson Ch2-L1'},
+  {node:'critic_node', time:1500, msg:'critic_node: pass ✔', cls:'critic'},
+  {node:'accept_lesson', time:200, msg:'accept_lesson Ch2-L1', cls:'done'},
+  {node:'write_lesson', time:3100, msg:'write_lesson Ch2-L2'},
+  {node:'critic_node', time:1500, msg:'critic_node: pass ✔', cls:'critic'},
+  {node:'accept_lesson', time:200, msg:'accept_lesson Ch2-L2', cls:'done'},
+  {node:'activities_generator', time:2200, msg:'activities_generator Ch2'},
+  {node:'chapter_guard', time:100, msg:'chapter_guard → Ch3'},
+  {node:'write_lesson', time:3000, msg:'write_lesson Ch3-L1'},
+  {node:'critic_node', time:1500, msg:'critic_node: pass ✔', cls:'critic'},
+  {node:'accept_lesson', time:200, msg:'accept_lesson Ch3-L1', cls:'done'},
+  {node:'write_lesson', time:3100, msg:'write_lesson Ch3-L2'},
+  {node:'critic_node', time:1500, msg:'critic_node: pass ✔', cls:'critic'},
+  {node:'accept_lesson', time:200, msg:'accept_lesson Ch3-L2', cls:'done'},
+  {node:'activities_generator', time:2200, msg:'activities_generator Ch3'},
+  {node:'END', time:100, msg:'🏁 Pipeline complete (phase 2 ≈ 259s real)', cls:'end'}
+];
+
+const optTrace = [
+  {node:'START', time:0, msg:'🟢 Start pipeline', cls:'done'},
+  {node:'self_awareness', time:200, msg:'self_awareness'},
+  {node:'search_planner_once', time:800, msg:'search_planner_once: 1 LLM call → 5 queries', cls:'parallel'},
+  {node:'web_search_parallel', time:800, msg:'web_search_parallel: asyncio.gather × 5 (all in parallel)', cls:'parallel'},
+  {node:'clarify_with_user', time:300, msg:'⏸ clarify_with_user: HITL resumed'},
+  {node:'outline_generator', time:2500, msg:'outline_generator: 3 chapters × 2 lessons'},
+  {node:'lesson_fanout', time:200, msg:'lesson_fanout: emits Send × 6', cls:'parallel'},
+  {node:'lesson_worker #1', time:0, msg:'▸ lesson_worker #1 START (Ch1-L1)', cls:'parallel'},
+  {node:'lesson_worker #2', time:0, msg:'▸ lesson_worker #2 START (Ch1-L2)', cls:'parallel'},
+  {node:'lesson_worker #N', time:3500, msg:'▸ workers #3..#6 running in parallel (Ch2-L1, Ch2-L2, Ch3-L1, Ch3-L2)', cls:'parallel'},
+  {node:'lesson_worker #1', time:0, msg:'✓ worker #1 done (write+critic inline)', cls:'done'},
+  {node:'lesson_worker #2', time:500, msg:'✓ worker #2 done', cls:'done'},
+  {node:'lesson_worker #N', time:300, msg:'✓ workers #3..#6 done', cls:'done'},
+  {node:'join_lessons', time:100, msg:'join_lessons: barrier, merge 6 lessons'},
+  {node:'activities_generator', time:2200, msg:'activities_generator Ch1'},
+  {node:'activities_generator', time:2200, msg:'activities_generator Ch2'},
+  {node:'activities_generator', time:2200, msg:'activities_generator Ch3'},
+  {node:'finalize', time:150, msg:'finalize: phase=done', cls:'done'},
+  {node:'END', time:100, msg:'🏁 Pipeline complete (phase 2 ≈ 83s real)', cls:'end'}
+];
+
+async function simulate(which) {
+  resetGraph(which);
+  const btn = document.getElementById('btn-'+which);
+  btn.disabled = true;
+  const trace = which === 'current' ? currentTrace : optTrace;
+  const speed = parseFloat(document.getElementById('speed-'+which).value);
+  for (const step of trace) {
+    const d = (step.time || 100) / speed;
+    await new Promise(r => setTimeout(r, d));
+    highlight(which, step.node, '#fbbf24');
+    log(which, '<b>['+step.node+']</b> ' + step.msg, step.cls || '');
+    setTimeout(() => markDone(which, step.node), 400);
+  }
+  btn.disabled = false;
+}
+</script>
+</body>
+</html>
