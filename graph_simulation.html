@@ -138,28 +138,34 @@ flowchart TD
   <div class="layout">
     <div class="mermaid" id="mer-optimized">
 flowchart TD
-    S([START]):::startn --> SA[self_awareness]
-    SA --> SPO[search_planner_once]:::parallel
-    SPO -->|1 LLM call all queries| WSP[web_search_parallel]:::parallel
-    WSP -->|asyncio gather| CLR[clarify_with_user]:::pause
-    CLR -->|resume| OG[outline_generator]
-    OG --> LF[lesson_fanout]:::join
-    LF -.->|Send 1| W1[lesson_worker_1]:::parallel
-    LF -.->|Send 2| W2[lesson_worker_2]:::parallel
-    LF -.->|Send N| WN[lesson_worker_N]:::parallel
-    W1 --> JL[join_lessons]:::join
+    S([START]) --> SA[self_awareness]
+    SA --> SPO[search_planner_once]
+    SPO -- 1 LLM call all queries --> WSP[web_search_parallel]
+    WSP -- asyncio gather --> CLR[clarify_with_user]
+    CLR -- resume --> OG[outline_generator]
+    OG --> LF[lesson_fanout]
+    LF -- Send 1 --> W1[lesson_worker_1]
+    LF -- Send 2 --> W2[lesson_worker_2]
+    LF -- Send N --> WN[lesson_worker_N]
+    W1 --> JL[join_lessons]
     W2 --> JL
     WN --> JL
     JL --> AG[activities_generator]
-    AG -->|more| AG
-    AG -->|none| FIN[finalize]:::ok
-    FIN --> E([END]):::endn
-    classDef startn fill:#86efac,stroke:#166534,stroke-width:2px;
-    classDef endn fill:#fca5a5,stroke:#991b1b,stroke-width:2px;
-    classDef parallel fill:#ddd6fe,stroke:#5b21b6,stroke-width:2px;
-    classDef pause fill:#fde68a,stroke:#92400e;
-    classDef join fill:#a7f3d0,stroke:#047857,stroke-width:2px;
-    classDef ok fill:#bbf7d0,stroke:#15803d;
+    AG -- more chapter --> AG
+    AG -- all done --> FIN[finalize]
+    FIN --> E([END])
+    class S startn
+    class E endn
+    class SPO,WSP,W1,W2,WN parallel
+    class CLR pause
+    class LF,JL join
+    class FIN ok
+    classDef startn fill:#86efac,stroke:#166534,stroke-width:2px
+    classDef endn fill:#fca5a5,stroke:#991b1b,stroke-width:2px
+    classDef parallel fill:#ddd6fe,stroke:#5b21b6,stroke-width:2px
+    classDef pause fill:#fde68a,stroke:#92400e
+    classDef join fill:#a7f3d0,stroke:#047857,stroke-width:2px
+    classDef ok fill:#bbf7d0,stroke:#15803d
     </div>
     <div class="sidebar">
       <div class="describe" id="desc-optimized">
