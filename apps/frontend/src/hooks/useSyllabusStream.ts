@@ -7,7 +7,7 @@ import type { ClarificationInterrupt } from "@/lib/types";
 /**
  * Wraps @langchain/langgraph-sdk useStream with:
  *  - reconnectOnMount: true  → rejoins active run on page reload
- *  - fetchStateHistory: false → no expensive history fetch on mount
+ *  - fetchStateHistory: true → no expensive history fetch on mount
  *  - onCustomEvent → feeds the useAgentProgress reducer
  *  - onError      → surface 404s (stale thread ids) via onMissingThread callback
  */
@@ -22,7 +22,7 @@ export function useSyllabusStream(
     assistantId: LANGGRAPH_ASSISTANT,
     threadId: threadId ?? null,
     reconnectOnMount: true,
-    fetchStateHistory: false,
+    fetchStateHistory: true,
     onCustomEvent,
     onError: (err: unknown) => {
       const msg = (err as any)?.message ?? String(err);

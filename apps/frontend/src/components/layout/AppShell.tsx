@@ -48,7 +48,7 @@ export function AppShell() {
     try {
       await stream.submit(
         { requirements },
-        { streamMode: ["values", "messages-tuple", "custom"] }
+        { streamMode: ["values", "custom"] }
       );
     } catch (e) { console.error(e); setToast("Could not start the thread. Check the agent URL."); }
   }, [stream]);
@@ -103,7 +103,7 @@ export function AppShell() {
       ) : (
         <main className="flex min-h-0 flex-1 flex-col md:flex-row">
           <section className="min-h-0 flex-1 overflow-y-auto border-b border-border dark:border-border-dark md:border-b-0 md:border-r">
-            <CenterPlan store={store} progress={progress} threadId={threadId ?? undefined} />
+            <CenterPlan store={store} progress={progress} threadId={threadId ?? undefined} streaming={Boolean(stream?.isLoading)} />
           </section>
           <section className="min-h-0 w-full shrink-0 md:w-[380px] lg:w-[420px]">
             <AgentPane

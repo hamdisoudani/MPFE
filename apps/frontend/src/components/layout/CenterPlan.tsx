@@ -4,10 +4,11 @@ import type { AgentProgress } from "@/hooks/useAgentProgress";
 import { PhaseBanner } from "../plan/PhaseBanner";
 import { ChapterList } from "../plan/ChapterList";
 import { SearchStatus } from "../plan/SearchStatus";
+import { AgentTimeline } from "../plan/AgentTimeline";
 
 export function CenterPlan({
-  store, progress, threadId,
-}: { store: SyllabusStore; progress: AgentProgress; threadId: string | undefined }) {
+  store, progress, threadId, streaming = false,
+}: { store: SyllabusStore; progress: AgentProgress; threadId: string | undefined; streaming?: boolean }) {
   if (store.loading) return <p className="px-6 py-8 text-sm text-fg-muted">Loading syllabus…</p>;
   if (!store.syllabus) {
     return (
@@ -36,6 +37,10 @@ export function CenterPlan({
       </div>
 
       <SearchStatus progress={progress} />
+
+      <div className="mt-4">
+        <AgentTimeline progress={progress} streaming={streaming} />
+      </div>
 
       <div className="mt-6">
         <ChapterList store={store} progress={progress} />

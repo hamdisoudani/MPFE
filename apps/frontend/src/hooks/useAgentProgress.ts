@@ -2,6 +2,12 @@
 import { useCallback, useRef, useState } from "react";
 import type { AgentEvent, Phase } from "@/lib/types";
 
+export interface TimelineStep {
+  id: string;
+  at: number;
+  event: AgentEvent;
+}
+
 export interface AgentProgress {
   phase: Phase | null;
   searchProgress: { done: number; total: number; findings: number } | null;
@@ -15,15 +21,20 @@ export interface AgentProgress {
   lastActivity: { chapterId: string; lessonId: string | null; count: number } | null;
   errors: Array<{ node: string; message: string; at: number }>;
   eventCount: number;
+  timeline: TimelineStep[];
 }
+
+const MAX_TIMELINE = 80;
 
 const initial: AgentProgress = {
   phase: null, searchProgress: null, activeChapter: null, activeLesson: null,
-  lastCommitted: null, lastActivity: null, errors: [], eventCount: 0,
+  lastCommitted: null, lastActivity: null, errors: [], eventCount: 0, timeline: [],
 };
 
 export function reduceEvent(prev: AgentProgress, evt: AgentEvent): AgentProgress {
-  const next = { ...prev, eventCount: prev.eventCount + 1 };
+  const step: TimelineStep = { id: `${Date.now()}-${prev.eventCount}`, at: Date.now(), event: evt };
+  const timeline = [...prev.timeline, step].slice(-MAX_TIMELINE);
+  const next = { ...prev, eventCount: prev.eventCount + 1, timeline };
   switch (evt.type) {
     case "phase_changed":
       return { ...next, phase: evt.phase };

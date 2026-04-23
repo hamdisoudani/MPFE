@@ -5,7 +5,6 @@ import { useDraftStorage } from "@/hooks/useDraftStorage";
 import { ClarifyForm } from "../forms/ClarifyForm";
 import { MessageList } from "../chat/MessageList";
 import { Composer } from "../chat/Composer";
-import { AgentActivity } from "../chat/AgentActivity";
 import { StopCircle } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useEffect, useRef } from "react";
@@ -69,8 +68,6 @@ export function AgentPane({
       </header>
 
       <div ref={scrollerRef} className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-3 py-3 space-y-3">
-        <AgentActivity progress={progress} streaming={isStreaming} />
-
         <MessageList messages={messages} progress={progress} streaming={isStreaming && messages.length === 0} />
 
         {interrupt?.kind === "clarification" && (
