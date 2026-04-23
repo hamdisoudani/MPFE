@@ -9,7 +9,7 @@ import type { ClarificationInterrupt } from "@/lib/types";
  *  - reconnectOnMount: true  → rejoins active run on page reload
  *  - fetchStateHistory: false → no expensive history fetch on mount
  *  - onCustomEvent → feeds the useAgentProgress reducer
- *  - onError      → swallow 404s (stale thread ids from URL) and surface other errors
+ *  - onError      → surface 404s (stale thread ids) via onMissingThread callback
  */
 export function useSyllabusStream(
   threadId: string | undefined,
@@ -26,7 +26,8 @@ export function useSyllabusStream(
     onCustomEvent,
     onError: (err: unknown) => {
       const msg = (err as any)?.message ?? String(err);
-      if (/404|not.*found/i.test(msg) && onMissingThread) {
+      const status = (err as any)?.status ?? (err as any)?.response?.status;
+      if ((status === 404 || /404|not.*found/i.test(msg)) && threadId && onMissingThread) {
         onMissingThread();
         return;
       }

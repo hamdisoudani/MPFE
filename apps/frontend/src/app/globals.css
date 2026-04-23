@@ -23,7 +23,6 @@
   .btn         { @apply inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm
                  font-medium transition disabled:opacity-50 disabled:cursor-not-allowed
                  border border-border dark:border-border-dark hover:bg-accent-soft dark:hover:bg-panel-dark/60; }
-  /* Primary = near-black in light, near-white in dark — shadcn / open-swe look */
   .btn-primary { @apply btn bg-accent text-accent-fg border-accent
                  hover:bg-fg-muted hover:border-fg-muted
                  dark:bg-fg-dark dark:text-bg-dark dark:border-fg-dark dark:hover:bg-fg-muted; }
@@ -32,6 +31,9 @@
                  dark:bg-panel-dark px-3 py-2 text-sm outline-none
                  focus:border-fg dark:focus:border-fg-dark
                  focus:ring-2 focus:ring-fg/10 dark:focus:ring-fg-dark/20; }
+  .prose-chat  { @apply text-sm leading-relaxed [&>*]:mb-2 last:[&>*]:mb-0; }
+  .prose-chat a { @apply break-words; }
+  .prose-chat pre { @apply whitespace-pre-wrap; }
 }
 
 @layer utilities {

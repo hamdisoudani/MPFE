@@ -1,7 +1,15 @@
 "use client";
 import { useThreadsSWR } from "@/hooks/useThreadsSWR";
-import { Plus, CircleDot, CircleCheck, CircleAlert } from "lucide-react";
+import { Plus, CircleDot, CircleCheck, CircleAlert, PauseCircle } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { readThreadStatus, threadTitle, type ThreadStatus } from "@/lib/threadStatus";
+
+const STATUS_META: Record<ThreadStatus, { Icon: any; cls: string; label: string }> = {
+  busy:        { Icon: CircleDot,   cls: "text-accent animate-pulse-dot", label: "running" },
+  interrupted: { Icon: PauseCircle, cls: "text-warn",                     label: "waiting" },
+  error:       { Icon: CircleAlert, cls: "text-err",                      label: "error" },
+  idle:        { Icon: CircleCheck, cls: "text-fg-muted",                 label: "idle" },
+};
 
 export function Sidebar({
   activeThreadId, onSelect, onNew,
@@ -32,27 +40,22 @@ export function Sidebar({
 }
 
 function ThreadRow({ thread, active, onSelect }: { thread: any; active: boolean; onSelect: (id: string) => void }) {
-  const status = (thread.status ?? "idle") as string;
-  const Icon = status === "busy" ? CircleDot : status === "error" ? CircleAlert : CircleCheck;
-  const iconCls =
-    status === "busy" ? "text-accent animate-pulse-dot" :
-    status === "error" ? "text-err" : "text-fg-muted";
-  const title =
-    thread?.values?.title ||
-    thread?.metadata?.title ||
-    thread.thread_id?.slice(0, 8) ||
-    "Untitled";
+  const status = readThreadStatus(thread);
+  const meta = STATUS_META[status];
+  const title = threadTitle(thread);
   return (
     <li>
       <button
         onClick={() => onSelect(thread.thread_id)}
         className={cn(
-          "flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-sm transition",
+          "group flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-sm transition",
           active ? "bg-accent-soft text-fg dark:bg-accent/15" : "hover:bg-bg dark:hover:bg-bg-dark"
         )}
+        title={`${meta.label} · ${thread.thread_id}`}
       >
-        <Icon className={cn("h-3.5 w-3.5 shrink-0", iconCls)} />
-        <span className="truncate">{title}</span>
+        <meta.Icon className={cn("h-3.5 w-3.5 shrink-0", meta.cls)} />
+        <span className="truncate flex-1">{title}</span>
+        <span className={cn("hidden group-hover:inline text-[10px]", meta.cls)}>{meta.label}</span>
       </button>
     </li>
   );
