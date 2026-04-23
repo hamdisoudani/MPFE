@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 from langgraph.types import Command
 from ..db.supabase_client import supabase
-
+from ..events import emit_phase, emit
 
 def self_awareness(state: dict) -> Command:
     sb = supabase()
@@ -17,9 +17,12 @@ def self_awareness(state: dict) -> Command:
             "phase": "searching",
         }, on_conflict="thread_id").execute()
         data = ins.data[0]
+        emit("syllabus_created", syllabus_id=data["id"], title=data["title"])
+        emit_phase("searching")
         return Command(goto="search_planner", update={"syllabus_id": data["id"], "phase": "searching"})
     data = row.data
     phase = data["phase"]
+    emit_phase(phase)
     upd: dict[str, Any] = {"syllabus_id": data["id"], "phase": phase,
                            "teacher_preferences": data.get("teacher_preferences")}
     if phase in ("searching", "awaiting_input"):

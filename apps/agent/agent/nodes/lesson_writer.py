@@ -5,6 +5,7 @@ from langgraph.types import Command
 from ..llm import writer_llm
 from ..db.supabase_client import supabase
 from ..prompts import writer_prompt
+from ..events import emit_lesson_attempt, emit_phase
 
 class LessonDraft(BaseModel):
     title: str
@@ -45,6 +46,15 @@ def write_lesson(state: dict) -> Command:
     prior_attempts = int(state.get("_draft_attempts") or 0)
     same = state.get("_draft_substep_id") == substep_id
     prior_critique = state.get("_critique") if (same and prior_attempts > 0) else None
+
+    emit_phase("writing")
+    emit_lesson_attempt(
+        lesson_substep_id=substep_id,
+        chapter_pos=chapter["position"],
+        position=next_pos,
+        attempt=prior_attempts + 1,
+        status="drafting",
+    )
 
     llm = writer_llm().with_structured_output(LessonDraft)
     draft: LessonDraft = llm.invoke(writer_prompt(
