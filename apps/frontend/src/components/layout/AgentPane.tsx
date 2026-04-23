@@ -31,7 +31,7 @@ export function AgentPane({
     clearDraft();
     try {
       await stream.submit(
-        { requirements: text, title: title || undefined, thread_id: threadId },
+        { requirements: text, title: title || undefined },
         { streamMode: ["values", "messages-tuple", "custom"] }
       );
       if (!threadId && stream.thread?.thread_id) onThreadCreated(stream.thread.thread_id);
