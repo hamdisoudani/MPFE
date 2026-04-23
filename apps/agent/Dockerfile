@@ -83,8 +83,9 @@ COPY . .
 RUN pip install -e .
 
 # Railway sets $PORT dynamically
-ENV PORT=8000
+ENV PORT=8000 \
+    BG_JOB_ISOLATED_LOOPS=true
 EXPOSE 8000
 
 # Launch LangGraph API server serving the `syllabus` graph from langgraph.json
-CMD ["sh", "-c", "langgraph dev --host 0.0.0.0 --port ${PORT:-8000} --no-browser"]
+CMD ["sh", "-c", "langgraph dev --host 0.0.0.0 --port ${PORT:-8000} --no-browser --allow-blocking"]
