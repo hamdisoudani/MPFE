@@ -13,7 +13,10 @@ export function AppShell() {
   const [threadId, setThreadId] = useQueryState("thread");
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  const { stream, progress, resetProgress } = useSyllabusStream(threadId ?? undefined);
+  const { stream, progress, resetProgress } = useSyllabusStream(
+    threadId ?? undefined,
+    () => { setThreadId(null); },
+  );
   const store = useSyllabusStore(threadId ?? undefined);
 
   return (

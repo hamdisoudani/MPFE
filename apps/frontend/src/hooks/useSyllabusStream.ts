@@ -9,8 +9,12 @@ import type { ClarificationInterrupt } from "@/lib/types";
  *  - reconnectOnMount: true  → rejoins active run on page reload
  *  - fetchStateHistory: false → no expensive history fetch on mount
  *  - onCustomEvent → feeds the useAgentProgress reducer
+ *  - onError      → swallow 404s (stale thread ids from URL) and surface other errors
  */
-export function useSyllabusStream(threadId: string | undefined) {
+export function useSyllabusStream(
+  threadId: string | undefined,
+  onMissingThread?: () => void,
+) {
   const { progress, onCustomEvent, reset } = useAgentProgress();
 
   const stream = useStream<any, { InterruptType: ClarificationInterrupt }>({
@@ -20,6 +24,14 @@ export function useSyllabusStream(threadId: string | undefined) {
     reconnectOnMount: true,
     fetchStateHistory: false,
     onCustomEvent,
+    onError: (err: unknown) => {
+      const msg = (err as any)?.message ?? String(err);
+      if (/404|not.*found/i.test(msg) && onMissingThread) {
+        onMissingThread();
+        return;
+      }
+      console.error("[syllabus-stream]", err);
+    },
   } as any);
 
   return { stream, progress, resetProgress: reset };

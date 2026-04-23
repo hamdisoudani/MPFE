@@ -10,31 +10,32 @@ const config: Config = {
         mono: ["JetBrains Mono", "ui-monospace", "SFMono-Regular", "monospace"],
       },
       colors: {
-        // open-swe-inspired palette: zinc neutrals + emerald accent
+        // open-swe palette — zinc neutrals, near-black primary, no green accents
         bg: {
-          DEFAULT: "rgb(250 250 250)",
-          dark: "rgb(9 9 11)",
+          DEFAULT: "rgb(250 250 250)",   // zinc-50
+          dark: "rgb(9 9 11)",            // zinc-950
         },
         panel: {
           DEFAULT: "rgb(255 255 255)",
-          dark: "rgb(24 24 27)",
+          dark: "rgb(24 24 27)",          // zinc-900
         },
         border: {
-          DEFAULT: "rgb(228 228 231)",
-          dark: "rgb(39 39 42)",
+          DEFAULT: "rgb(228 228 231)",    // zinc-200
+          dark: "rgb(39 39 42)",          // zinc-800
         },
         fg: {
-          DEFAULT: "rgb(24 24 27)",
-          dark: "rgb(244 244 245)",
-          muted: "rgb(113 113 122)",
+          DEFAULT: "rgb(24 24 27)",       // zinc-900
+          dark: "rgb(244 244 245)",       // zinc-100
+          muted: "rgb(113 113 122)",      // zinc-500
         },
+        // Primary = near-black (shadcn/open-swe style). Inverts in dark mode.
         accent: {
-          DEFAULT: "rgb(22 163 74)",    // emerald-ish, open-swe style
-          soft: "rgb(220 252 231)",
-          fg: "rgb(255 255 255)",
+          DEFAULT: "rgb(24 24 27)",       // zinc-900
+          soft: "rgb(244 244 245)",       // zinc-100
+          fg: "rgb(250 250 250)",         // zinc-50
         },
-        warn: { DEFAULT: "rgb(234 179 8)", soft: "rgb(254 249 195)" },
-        err:  { DEFAULT: "rgb(220 38 38)", soft: "rgb(254 226 226)" },
+        warn: { DEFAULT: "rgb(202 138 4)", soft: "rgb(254 249 195)" },  // amber-600
+        err:  { DEFAULT: "rgb(185 28 28)", soft: "rgb(254 226 226)" },  // red-700
       },
       borderRadius: { xl: "0.75rem", "2xl": "1rem" },
       keyframes: {
