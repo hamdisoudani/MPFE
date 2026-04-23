@@ -10,7 +10,7 @@ export function ActivityDetail({ activityId, store }: { activityId: string; stor
     <article className="flex-1 overflow-y-auto">
       <header className="mb-4">
         {chapter && <p className="text-xs uppercase tracking-wide text-fg-muted">Chapter {chapter.position} · {chapter.title}</p>}
-        <h2 className="mt-1 text-xl font-semibold">{activity.payload?.title ?? activity.kind ?? "Activity"}</h2>
+        <h2 className="mt-1 text-xl font-semibold">{activity.payload?.title ?? activity.payload?.kind ?? "Activity"}</h2>
       </header>
       <ActivityCard activity={activity} />
     </article>
