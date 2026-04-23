@@ -19,29 +19,44 @@
   button { padding:10px 20px; background:#0ea5e9; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600; font-size:14px; }
   button:hover { background:#0284c7; }
   button:disabled { background:#475569; cursor:not-allowed; }
-  .speed { color:#cbd5e1; }
   select { padding:8px 12px; background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:6px; }
+  .layout { display:grid; grid-template-columns: 1.4fr 1fr; gap:20px; }
   .mermaid { background:white; padding:24px; border-radius:12px; min-height:500px; }
-  .log { margin-top:20px; background:#0f172a; padding:16px; border-radius:8px; border:1px solid #334155; max-height:260px; overflow-y:auto; font-family: 'SF Mono', Consolas, monospace; font-size:13px; }
-  .log-entry { padding:6px 10px; margin-bottom:4px; border-left:3px solid #0ea5e9; background:#1e293b; border-radius:4px; }
+  .sidebar { display:flex; flex-direction:column; gap:16px; }
+  .describe { background:#0f172a; border:1px solid #334155; border-radius:12px; padding:18px; min-height:200px; }
+  .describe h3 { margin:0 0 8px; color:#38bdf8; font-size:15px; text-transform:uppercase; letter-spacing:0.05em; }
+  .describe .nodeName { font-size:20px; font-weight:700; color:#f1f5f9; margin-bottom:8px; }
+  .describe .purpose { color:#cbd5e1; font-size:14px; line-height:1.55; }
+  .describe .tech { margin-top:12px; padding-top:12px; border-top:1px solid #334155; color:#94a3b8; font-size:12px; font-family:'SF Mono',Consolas,monospace; }
+  .describe .badge { display:inline-block; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:700; margin-right:6px; }
+  .badge.llm { background:#7c3aed; color:white; }
+  .badge.io { background:#0891b2; color:white; }
+  .badge.parallel { background:#a855f7; color:white; }
+  .badge.guard { background:#f59e0b; color:white; }
+  .badge.hitl { background:#eab308; color:#422006; }
+  .log { background:#0f172a; padding:14px; border-radius:8px; border:1px solid #334155; max-height:320px; overflow-y:auto; font-family: 'SF Mono', Consolas, monospace; font-size:12px; }
+  .log-entry { padding:5px 8px; margin-bottom:3px; border-left:3px solid #0ea5e9; background:#1e293b; border-radius:4px; }
   .log-entry.done { border-left-color:#10b981; }
   .log-entry.parallel { border-left-color:#a855f7; }
   .log-entry.critic { border-left-color:#eab308; }
   .log-entry.end { border-left-color:#ef4444; }
-  .log-time { color:#64748b; font-size:11px; }
+  .log-time { color:#64748b; font-size:10px; }
   .stats { display:grid; grid-template-columns: repeat(4, 1fr); gap:12px; margin-bottom:20px; }
   .stat { background:#0f172a; padding:14px; border-radius:8px; border:1px solid #334155; }
   .stat .label { font-size:11px; color:#94a3b8; text-transform:uppercase; letter-spacing:0.05em; }
   .stat .value { font-size:22px; font-weight:700; color:#0ea5e9; margin-top:4px; }
-  .legend { display:flex; gap:16px; flex-wrap:wrap; font-size:12px; color:#cbd5e1; margin-top:12px;}
+  .legend { display:flex; gap:14px; flex-wrap:wrap; font-size:12px; color:#cbd5e1; margin-top:14px;}
   .legend span { display:inline-flex; align-items:center; gap:6px; }
-  .swatch { width:16px; height:16px; border-radius:4px; display:inline-block; border:1px solid #334155; }
+  .swatch { width:14px; height:14px; border-radius:4px; display:inline-block; border:1px solid #334155; }
+  table { width:100%; border-collapse:collapse; }
+  th,td { text-align:left; padding:10px; border:1px solid #334155; }
+  th { background:#0f172a; }
 </style>
 </head>
 <body>
 <header>
   <h1>🎓 MPFE Syllabus Agent — Interactive Graph Simulation</h1>
-  <div class="sub">Toggle between current vs optimized topology · Run simulated traces with timing · Watch nodes light up as they execute</div>
+  <div class="sub">Click ▶ Simulate. Nodes light up in order; a live description panel explains what each node does as it fires.</div>
 </header>
 
 <div class="tabs">
@@ -50,11 +65,12 @@
   <div class="tab" data-tab="compare">Side-by-Side</div>
 </div>
 
+<!-- CURRENT -->
 <div class="panel active" id="panel-current">
   <div class="controls">
     <button onclick="simulate('current')" id="btn-current">▶ Simulate Run</button>
     <button onclick="resetGraph('current')">⟲ Reset</button>
-    <span class="speed">Speed: </span>
+    <span>Speed:</span>
     <select id="speed-current"><option value="1">1×</option><option value="2" selected>2×</option><option value="5">5×</option><option value="10">10×</option></select>
   </div>
   <div class="stats">
@@ -63,28 +79,28 @@
     <div class="stat"><div class="label">Serper Calls</div><div class="value">5 serial</div></div>
     <div class="stat"><div class="label">Lesson Workers</div><div class="value">1 (serial)</div></div>
   </div>
-  <div class="mermaid" id="mer-current">
+  <div class="layout">
+    <div class="mermaid" id="mer-current">
 flowchart TD
-    START([🟢 START]):::startn --> self_awareness
-    self_awareness[self_awareness<br/><i>detect missing inputs</i>] --> search_planner
-    search_planner{search_planner<br/><i>plan one query at a time</i>}:::plan
-    search_planner -->|queries ready| web_search[web_search<br/><i>Serper call</i>]:::search
-    web_search -->|"loop: cursor++"| search_planner
-    search_planner -->|cursor ≥ N| clarify_with_user[clarify_with_user<br/><i>interrupt + HITL</i>]:::pause
-    clarify_with_user -->|resume| outline_generator[outline_generator<br/><i>chapters + lesson plans</i>]
-    outline_generator --> chapter_guard{chapter_guard}:::guard
-    chapter_guard -->|pending chapter| write_lesson[write_lesson<br/><i>LLM generates lesson</i>]:::work
-    chapter_guard -->|all done| END_node([🔴 END]):::endn
-    write_lesson --> critic_node{critic_node<br/><i>rubric check</i>}:::critic
-    critic_node -->|pass| accept_lesson[accept_lesson]:::ok
-    critic_node -->|fail| reject_lesson[reject_lesson]:::bad
-    accept_lesson --> activities_generator[activities_generator<br/><i>quiz per chapter</i>]
-    reject_lesson -->|attempt &lt; 3| write_lesson
-    reject_lesson -->|force-accept| chapter_guard
-    activities_generator -->|more plans| activities_generator
-    activities_generator -->|none ready| chapter_guard
-    classDef startn fill:#86efac,stroke:#166534,stroke-width:2px,color:#14532d;
-    classDef endn fill:#fca5a5,stroke:#991b1b,stroke-width:2px,color:#7f1d1d;
+    S([START]):::startn --> SA[self_awareness]
+    SA --> SP{search_planner}:::plan
+    SP -->|queries ready| WS[web_search]:::search
+    WS -->|loop cursor plus plus| SP
+    SP -->|cursor ge N| CLR[clarify_with_user]:::pause
+    CLR -->|resume| OG[outline_generator]
+    OG --> CG{chapter_guard}:::guard
+    CG -->|pending| WL[write_lesson]:::work
+    CG -->|all done| E([END]):::endn
+    WL --> CR{critic_node}:::critic
+    CR -->|pass| AL[accept_lesson]:::ok
+    CR -->|fail| RL[reject_lesson]:::bad
+    AL --> AG[activities_generator]
+    RL -->|attempt lt 3| WL
+    RL -->|force accept| CG
+    AG -->|more plans| AG
+    AG -->|none ready| CG
+    classDef startn fill:#86efac,stroke:#166534,stroke-width:2px;
+    classDef endn fill:#fca5a5,stroke:#991b1b,stroke-width:2px;
     classDef plan fill:#bfdbfe,stroke:#1e40af;
     classDef search fill:#bae6fd,stroke:#0369a1;
     classDef pause fill:#fde68a,stroke:#92400e;
@@ -93,70 +109,86 @@ flowchart TD
     classDef critic fill:#fef08a,stroke:#a16207;
     classDef ok fill:#bbf7d0,stroke:#15803d;
     classDef bad fill:#fecaca,stroke:#b91c1c;
+    </div>
+    <div class="sidebar">
+      <div class="describe" id="desc-current">
+        <h3>Live Node Description</h3>
+        <div class="nodeName">Press ▶ Simulate Run</div>
+        <div class="purpose">Each node will light up in order. A detailed explanation of what it does, which LLM it calls, and what it writes to state appears here.</div>
+      </div>
+      <div class="log" id="log-current"></div>
+    </div>
   </div>
-  <div class="log" id="log-current"></div>
 </div>
 
+<!-- OPTIMIZED -->
 <div class="panel" id="panel-optimized">
   <div class="controls">
     <button onclick="simulate('optimized')" id="btn-optimized">▶ Simulate Run</button>
     <button onclick="resetGraph('optimized')">⟲ Reset</button>
-    <span class="speed">Speed: </span>
+    <span>Speed:</span>
     <select id="speed-optimized"><option value="1">1×</option><option value="2" selected>2×</option><option value="5">5×</option><option value="10">10×</option></select>
   </div>
   <div class="stats">
     <div class="stat"><div class="label">Phase 2 Time</div><div class="value">83 s</div></div>
     <div class="stat"><div class="label">LLM Calls</div><div class="value">~12</div></div>
     <div class="stat"><div class="label">Serper Calls</div><div class="value">5 parallel</div></div>
-    <div class="stat"><div class="label">Lesson Workers</div><div class="value">N parallel (Send)</div></div>
+    <div class="stat"><div class="label">Lesson Workers</div><div class="value">N parallel</div></div>
   </div>
-  <div class="mermaid" id="mer-optimized">
+  <div class="layout">
+    <div class="mermaid" id="mer-optimized">
 flowchart TD
-    START([🟢 START]):::startn --> self_awareness
-    self_awareness[self_awareness] --> search_planner_parallel[search_planner_once<br/><i>1 LLM call → all queries</i>]:::parallel
-    search_planner_parallel -->|plan list| web_search_parallel[web_search_parallel<br/><i>asyncio.gather N queries</i>]:::parallel
-    web_search_parallel -->|findings[]| clarify_with_user[clarify_with_user]:::pause
-    clarify_with_user -->|resume| outline_generator[outline_generator]
-    outline_generator --> lesson_fanout[lesson_fanout<br/><i>emits Send×N</i>]:::join
-    lesson_fanout -.->|Send 1| w1[lesson_worker #1<br/><i>write+critic+retry</i>]:::parallel
-    lesson_fanout -.->|Send 2| w2[lesson_worker #2<br/><i>write+critic+retry</i>]:::parallel
-    lesson_fanout -.->|Send N| w3[lesson_worker #N<br/><i>write+critic+retry</i>]:::parallel
-    w1 --> join_lessons[join_lessons<br/><i>barrier</i>]:::join
-    w2 --> join_lessons
-    w3 --> join_lessons
-    join_lessons --> activities_generator[activities_generator]
-    activities_generator -->|more| activities_generator
-    activities_generator -->|none| finalize[finalize<br/><i>phase=done</i>]:::ok
-    finalize --> END_node([🔴 END]):::endn
+    S([START]):::startn --> SA[self_awareness]
+    SA --> SPO[search_planner_once]:::parallel
+    SPO -->|1 LLM call all queries| WSP[web_search_parallel]:::parallel
+    WSP -->|asyncio gather| CLR[clarify_with_user]:::pause
+    CLR -->|resume| OG[outline_generator]
+    OG --> LF[lesson_fanout]:::join
+    LF -.->|Send 1| W1[lesson_worker_1]:::parallel
+    LF -.->|Send 2| W2[lesson_worker_2]:::parallel
+    LF -.->|Send N| WN[lesson_worker_N]:::parallel
+    W1 --> JL[join_lessons]:::join
+    W2 --> JL
+    WN --> JL
+    JL --> AG[activities_generator]
+    AG -->|more| AG
+    AG -->|none| FIN[finalize]:::ok
+    FIN --> E([END]):::endn
     classDef startn fill:#86efac,stroke:#166534,stroke-width:2px;
     classDef endn fill:#fca5a5,stroke:#991b1b,stroke-width:2px;
     classDef parallel fill:#ddd6fe,stroke:#5b21b6,stroke-width:2px;
     classDef pause fill:#fde68a,stroke:#92400e;
     classDef join fill:#a7f3d0,stroke:#047857,stroke-width:2px;
     classDef ok fill:#bbf7d0,stroke:#15803d;
+    </div>
+    <div class="sidebar">
+      <div class="describe" id="desc-optimized">
+        <h3>Live Node Description</h3>
+        <div class="nodeName">Press ▶ Simulate Run</div>
+        <div class="purpose">Watch the Send fan-out: after <code>lesson_fanout</code>, N lesson workers light up simultaneously and merge back at <code>join_lessons</code>.</div>
+      </div>
+      <div class="log" id="log-optimized"></div>
+    </div>
   </div>
-  <div class="log" id="log-optimized"></div>
 </div>
 
+<!-- COMPARE -->
 <div class="panel" id="panel-compare">
   <h3 style="margin-top:0">Architecture Comparison</h3>
-  <table style="width:100%;border-collapse:collapse;">
-    <thead><tr style="background:#0f172a">
-      <th style="text-align:left;padding:10px;border:1px solid #334155">Aspect</th>
-      <th style="text-align:left;padding:10px;border:1px solid #334155">Current</th>
-      <th style="text-align:left;padding:10px;border:1px solid #334155">Optimized</th>
-      <th style="text-align:left;padding:10px;border:1px solid #334155">Gain</th>
+  <table>
+    <thead><tr>
+      <th>Aspect</th><th>Current</th><th>Optimized</th><th>Gain</th>
     </tr></thead>
     <tbody>
-      <tr><td style="padding:10px;border:1px solid #334155">Search planning</td><td style="padding:10px;border:1px solid #334155">N LLM calls (1 per query, cursor loop)</td><td style="padding:10px;border:1px solid #334155">1 LLM call returning all queries</td><td style="padding:10px;border:1px solid #334155;color:#10b981">~N×</td></tr>
-      <tr><td style="padding:10px;border:1px solid #334155">Web search</td><td style="padding:10px;border:1px solid #334155">Serial Serper calls via cursor</td><td style="padding:10px;border:1px solid #334155">asyncio.gather parallel fan-out</td><td style="padding:10px;border:1px solid #334155;color:#10b981">~3× on 5 queries</td></tr>
-      <tr><td style="padding:10px;border:1px solid #334155">Lesson writing</td><td style="padding:10px;border:1px solid #334155">Sequential write → critic → accept/reject loop per lesson</td><td style="padding:10px;border:1px solid #334155">Send fan-out: N workers run write+critic+retry in parallel</td><td style="padding:10px;border:1px solid #334155;color:#10b981">~3× on 6 lessons</td></tr>
-      <tr><td style="padding:10px;border:1px solid #334155">Phase 2 total</td><td style="padding:10px;border:1px solid #334155"><b>259 s</b></td><td style="padding:10px;border:1px solid #334155"><b>83 s</b></td><td style="padding:10px;border:1px solid #334155;color:#10b981"><b>2.93×</b></td></tr>
-      <tr><td style="padding:10px;border:1px solid #334155">State size</td><td style="padding:10px;border:1px solid #334155">43.5 KB</td><td style="padding:10px;border:1px solid #334155">39.6 KB</td><td style="padding:10px;border:1px solid #334155;color:#10b981">−9%</td></tr>
-      <tr><td style="padding:10px;border:1px solid #334155">Topology</td><td style="padding:10px;border:1px solid #334155">Linear with critic retry loop</td><td style="padding:10px;border:1px solid #334155">Fan-out/fan-in via LangGraph <code>Send</code></td><td style="padding:10px;border:1px solid #334155">—</td></tr>
+      <tr><td>Search planning</td><td>N LLM calls (1 per query, cursor loop)</td><td>1 LLM call returning all queries</td><td style="color:#10b981">~N×</td></tr>
+      <tr><td>Web search</td><td>Serial Serper calls via cursor</td><td>asyncio.gather parallel fan-out</td><td style="color:#10b981">~3× on 5 queries</td></tr>
+      <tr><td>Lesson writing</td><td>Sequential write → critic → accept/reject loop per lesson</td><td>Send fan-out: N workers run write+critic+retry in parallel</td><td style="color:#10b981">~3× on 6 lessons</td></tr>
+      <tr><td>Phase 2 total</td><td><b>259 s</b></td><td><b>83 s</b></td><td style="color:#10b981"><b>2.93×</b></td></tr>
+      <tr><td>State size</td><td>43.5 KB</td><td>39.6 KB</td><td style="color:#10b981">−9%</td></tr>
+      <tr><td>Topology</td><td>Linear with critic retry loop</td><td>Fan-out / fan-in via LangGraph <code>Send</code></td><td>—</td></tr>
     </tbody>
   </table>
-  <div class="legend" style="margin-top:24px">
+  <div class="legend">
     <span><span class="swatch" style="background:#86efac"></span>START</span>
     <span><span class="swatch" style="background:#fca5a5"></span>END</span>
     <span><span class="swatch" style="background:#ddd6fe"></span>Parallel node</span>
@@ -167,7 +199,7 @@ flowchart TD
 </div>
 
 <script>
-mermaid.initialize({startOnLoad:true, theme:'default', flowchart:{curve:'basis', nodeSpacing:55, rankSpacing:55}, themeVariables:{fontSize:'15px'}});
+mermaid.initialize({startOnLoad:true, theme:'default', securityLevel:'loose', flowchart:{curve:'basis', nodeSpacing:55, rankSpacing:55}, themeVariables:{fontSize:'14px'}});
 
 document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
   document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
@@ -176,111 +208,150 @@ document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () =>
   document.getElementById('panel-' + t.dataset.tab).classList.add('active');
 }));
 
+// Rich descriptions for every node
+const DESC = {
+  'START': {badge:'io', label:'START', purpose:'Entry point of the LangGraph. Initial state is seeded with the teacher\'s syllabus requirements (subject, level, chapters, duration, audience).', tech:'state: SyllabusState(requirements, syllabus_id, messages=[])'},
+  'self_awareness': {badge:'llm', label:'self_awareness', purpose:'First LLM reflection: the agent inspects its own input requirements, detects missing or ambiguous fields (e.g. missing level, unclear audience), and drafts clarifying questions if needed. Also estimates scope (chapters × lessons).', tech:'LLM: xAI grok-4 · reads: requirements · writes: scope_estimate, missing_fields'},
+  'search_planner': {badge:'llm', label:'search_planner (sequential)', purpose:'Plans ONE search query at a time for a cursor index. Loops back and forth with web_search, advancing the cursor after each Serper call. Expensive: N separate LLM calls for N queries.', tech:'LLM call per query · state: search_plan[cursor], cursor++ on each loop'},
+  'search_planner_once': {badge:'parallel', label:'search_planner_once (optimized)', purpose:'Plans ALL search queries in a SINGLE LLM call. Returns a list of query objects covering domain research, pedagogy standards, and example materials. Kills the per-query cursor loop entirely.', tech:'1× LLM call → list[SearchQuery] · writes: search_plan (all at once)'},
+  'web_search': {badge:'io', label:'web_search (sequential)', purpose:'Executes one Serper.dev API call for the current plan[cursor], stores findings in state, then hands control back to search_planner. Latency-bound: each call ~400–800ms serially.', tech:'Serper HTTP POST · writes: findings[].append(result)'},
+  'web_search_parallel': {badge:'parallel', label:'web_search_parallel (optimized)', purpose:'Executes ALL Serper calls concurrently via httpx.AsyncClient + asyncio.gather. 5 queries that took ~3s serially now finish in ~0.8s wall-clock. Single node, no cursor.', tech:'asyncio.gather(*[serper(q) for q in plan]) · writes: findings[] (flat)'},
+  'clarify_with_user': {badge:'hitl', label:'clarify_with_user', purpose:'Human-in-the-loop checkpoint. If self_awareness flagged missing fields, interrupts the graph and waits for the teacher to reply. LangGraph checkpointer persists state so the run can resume later.', tech:'interrupt() + Command(resume=...) · InMemorySaver checkpoint'},
+  'outline_generator': {badge:'llm', label:'outline_generator', purpose:'Builds the syllabus skeleton: chapter titles, learning objectives, and a lesson_plan list per chapter (order, type: lecture/practical/quiz, key goals). This becomes the contract for the rest of the graph.', tech:'LLM call · writes: outline{chapters[], lesson_plans[]} + persists to Supabase'},
+  'chapter_guard': {badge:'guard', label:'chapter_guard', purpose:'Router: picks the next pending chapter. If all chapters are complete → END. Otherwise → write_lesson for that chapter\'s next pending lesson_pos.', tech:'conditional edge · reads: outline, lesson_progress'},
+  'write_lesson': {badge:'llm', label:'write_lesson', purpose:'Generates full lesson content for current (chapter, lesson_pos) using findings as evidence. Produces markdown sections: intro, concepts, examples, summary. Each call is ~3s.', tech:'LLM call · writes: lessons[chapter_id][pos] + Supabase insert'},
+  'critic_node': {badge:'llm', label:'critic_node', purpose:'Rubric-based quality check: evaluates the just-written lesson against pedagogical criteria (clarity, coverage, citations, level-appropriate). Returns pass/fail + structured critique.', tech:'LLM call (NVIDIA mistral, JSON mode) · writes: critic_reports[]'},
+  'accept_lesson': {badge:'io', label:'accept_lesson', purpose:'Marks the lesson as approved, increments lesson_pos, clears the retry counter. Transitions toward activities_generator.', tech:'state update only · no LLM'},
+  'reject_lesson': {badge:'io', label:'reject_lesson', purpose:'Critic failed. If attempt < 3, rewrite with critique feedback. If attempt >= 3, force-accept to avoid infinite loops and log a warning.', tech:'state update: attempt++, feedback injected into next write_lesson prompt'},
+  'activities_generator': {badge:'llm', label:'activities_generator', purpose:'After all lessons in a chapter are written, generates chapter-scoped activities (quizzes, exercises, reflection prompts). Loops on itself while more activity_plans are pending.', tech:'LLM call per activity_plan · writes: activities[chapter_id][] + Supabase'},
+  'lesson_fanout': {badge:'parallel', label:'lesson_fanout', purpose:'The core optimization: reads all 6 lesson_plans and emits LangGraph Send(lesson_worker, plan) for each. This forks the graph into N parallel branches instead of looping serially.', tech:'returns [Send("lesson_worker", plan_with_context) × N]'},
+  'lesson_worker_1': {badge:'parallel', label:'lesson_worker_1', purpose:'Independent worker handling one lesson plan. Runs write + critic + up-to-3-retries INLINE (not as separate graph nodes) so each worker is self-contained and can run fully in parallel with siblings.', tech:'inline: write → critic → (retry|accept) · writes: lessons[], critic_reports[]'},
+  'lesson_worker_2': {badge:'parallel', label:'lesson_worker_2', purpose:'Second parallel worker. Fires at the same instant as worker_1 from lesson_fanout\'s Send dispatch. xAI tier allows ~3 concurrent requests, so effective speedup is ~3× on 6 lessons.', tech:'same as worker_1 · different plan payload'},
+  'lesson_worker_N': {badge:'parallel', label:'lesson_worker_N', purpose:'Generic Nth worker. LangGraph\'s Send primitive replaces the worker\'s input state with the payload, so we inject syllabus_id + requirements + teacher_preferences into every Send dict.', tech:'state replaced by Send payload · must contain all required context'},
+  'join_lessons': {badge:'guard', label:'join_lessons', purpose:'Barrier / fan-in node. LangGraph aggregates all lesson_worker outputs into the shared state (lessons list, critic_reports list) via reducer functions before proceeding.', tech:'reducer: operator.add on lessons & critic_reports channels'},
+  'finalize': {badge:'io', label:'finalize', purpose:'Marks phase=done, stamps final_at timestamp, triggers last Supabase sync. Terminal node before END.', tech:'writes: phase="done", completed_at=now() + Supabase update'},
+  'END': {badge:'io', label:'END', purpose:'Graph terminal. LangGraph checkpointer saves the final state. Total phase-2 wall-clock printed by the driver.', tech:'state: phase=done, lessons=6, activities=3'}
+};
+
+function setDesc(which, key, logMsg) {
+  const d = DESC[key]; if (!d) return;
+  const box = document.getElementById('desc-'+which);
+  box.innerHTML = `
+    <h3>Live Node Description</h3>
+    <div class="nodeName"><span class="badge ${d.badge}">${d.badge.toUpperCase()}</span>${d.label}</div>
+    <div class="purpose">${d.purpose}</div>
+    <div class="tech">${d.tech}</div>
+    ${logMsg ? `<div style="margin-top:10px;color:#38bdf8;font-size:13px">▶ ${logMsg}</div>` : ''}
+  `;
+}
+
 function log(which, msg, cls='') {
   const el = document.getElementById('log-'+which);
-  const t = new Date().toISOString().substr(11,12);
+  const t = new Date().toISOString().substr(11,8);
   const e = document.createElement('div');
   e.className = 'log-entry ' + cls;
-  e.innerHTML = '<span class="log-time">'+t+'</span> &nbsp; ' + msg;
+  e.innerHTML = '<span class="log-time">'+t+'</span> ' + msg;
   el.appendChild(e); el.scrollTop = el.scrollHeight;
 }
 
-function highlight(which, nodeText, color='#fbbf24') {
+function highlightNode(which, nodeId, color='#fbbf24') {
   const svg = document.querySelector('#mer-'+which+' svg');
   if (!svg) return;
-  svg.querySelectorAll('g.node').forEach(g => {
-    const txt = g.textContent || '';
-    if (txt.includes(nodeText)) {
-      const shape = g.querySelector('rect, polygon, path, circle');
-      if (shape) { shape.style.filter = 'drop-shadow(0 0 12px '+color+')'; shape.style.stroke = color; shape.style.strokeWidth = '3px'; }
-    }
+  const g = svg.querySelector('#flowchart-'+nodeId+'-0, [id^="flowchart-'+nodeId+'-"]');
+  const nodes = g ? [g] : Array.from(svg.querySelectorAll('g.node')).filter(n => (n.id||'').includes('-'+nodeId+'-'));
+  nodes.forEach(n => {
+    const shape = n.querySelector('rect, polygon, path, circle, ellipse');
+    if (shape) { shape.style.filter = 'drop-shadow(0 0 14px '+color+')'; shape.style.stroke = color; shape.style.strokeWidth = '3.5px'; }
   });
 }
 
-function markDone(which, nodeText) {
+function markDoneNode(which, nodeId) {
   const svg = document.querySelector('#mer-'+which+' svg');
   if (!svg) return;
-  svg.querySelectorAll('g.node').forEach(g => {
-    const txt = g.textContent || '';
-    if (txt.includes(nodeText)) {
-      const shape = g.querySelector('rect, polygon, path, circle');
-      if (shape) { shape.style.filter = 'drop-shadow(0 0 6px #10b981)'; shape.style.stroke = '#10b981'; }
-    }
+  const nodes = Array.from(svg.querySelectorAll('g.node')).filter(n => (n.id||'').includes('-'+nodeId+'-'));
+  nodes.forEach(n => {
+    const shape = n.querySelector('rect, polygon, path, circle, ellipse');
+    if (shape) { shape.style.filter = 'drop-shadow(0 0 6px #10b981)'; shape.style.stroke = '#10b981'; shape.style.strokeWidth = '2px'; }
   });
 }
 
 function resetGraph(which) {
   document.getElementById('log-'+which).innerHTML = '';
   const svg = document.querySelector('#mer-'+which+' svg');
-  if (!svg) return;
-  svg.querySelectorAll('g.node').forEach(g => {
-    const shape = g.querySelector('rect, polygon, path, circle');
-    if (shape) { shape.style.filter = ''; shape.style.stroke = ''; shape.style.strokeWidth = ''; }
+  if (svg) svg.querySelectorAll('g.node').forEach(n => {
+    const s = n.querySelector('rect, polygon, path, circle, ellipse');
+    if (s) { s.style.filter=''; s.style.stroke=''; s.style.strokeWidth=''; }
   });
+  const box = document.getElementById('desc-'+which);
+  box.innerHTML = `<h3>Live Node Description</h3><div class="nodeName">Press ▶ Simulate Run</div><div class="purpose">Descriptions will appear here for each node as it fires.</div>`;
 }
 
+// trace: {id: mermaid node id, desc: key in DESC, time: ms, msg: log line, cls}
 const currentTrace = [
-  {node:'START', time:0, msg:'🟢 Start pipeline', cls:'done'},
-  {node:'self_awareness', time:200, msg:'self_awareness: detect missing fields'},
-  {node:'search_planner', time:800, msg:'search_planner: plan query 1/5'},
-  {node:'web_search', time:600, msg:'web_search: Serper call 1/5', cls:'parallel'},
-  {node:'search_planner', time:700, msg:'search_planner: plan query 2/5'},
-  {node:'web_search', time:600, msg:'web_search: Serper call 2/5'},
-  {node:'search_planner', time:700, msg:'search_planner: plan query 3/5'},
-  {node:'web_search', time:600, msg:'web_search: Serper call 3/5'},
-  {node:'search_planner', time:700, msg:'search_planner: plan query 4/5'},
-  {node:'web_search', time:600, msg:'web_search: Serper call 4/5'},
-  {node:'search_planner', time:700, msg:'search_planner: plan query 5/5'},
-  {node:'web_search', time:600, msg:'web_search: Serper call 5/5'},
-  {node:'clarify_with_user', time:300, msg:'⏸ clarify_with_user: HITL resumed'},
-  {node:'outline_generator', time:2500, msg:'outline_generator: 3 chapters × 2 lessons'},
-  {node:'chapter_guard', time:100, msg:'chapter_guard → Ch1'},
-  {node:'write_lesson', time:3000, msg:'write_lesson Ch1-L1'},
-  {node:'critic_node', time:1500, msg:'critic_node: pass ✔', cls:'critic'},
-  {node:'accept_lesson', time:200, msg:'accept_lesson Ch1-L1', cls:'done'},
-  {node:'write_lesson', time:3200, msg:'write_lesson Ch1-L2'},
-  {node:'critic_node', time:1500, msg:'critic_node: pass ✔', cls:'critic'},
-  {node:'accept_lesson', time:200, msg:'accept_lesson Ch1-L2', cls:'done'},
-  {node:'activities_generator', time:2200, msg:'activities_generator Ch1'},
-  {node:'chapter_guard', time:100, msg:'chapter_guard → Ch2'},
-  {node:'write_lesson', time:3000, msg:'write_lesson Ch2-L1'},
-  {node:'critic_node', time:1500, msg:'critic_node: pass ✔', cls:'critic'},
-  {node:'accept_lesson', time:200, msg:'accept_lesson Ch2-L1', cls:'done'},
-  {node:'write_lesson', time:3100, msg:'write_lesson Ch2-L2'},
-  {node:'critic_node', time:1500, msg:'critic_node: pass ✔', cls:'critic'},
-  {node:'accept_lesson', time:200, msg:'accept_lesson Ch2-L2', cls:'done'},
-  {node:'activities_generator', time:2200, msg:'activities_generator Ch2'},
-  {node:'chapter_guard', time:100, msg:'chapter_guard → Ch3'},
-  {node:'write_lesson', time:3000, msg:'write_lesson Ch3-L1'},
-  {node:'critic_node', time:1500, msg:'critic_node: pass ✔', cls:'critic'},
-  {node:'accept_lesson', time:200, msg:'accept_lesson Ch3-L1', cls:'done'},
-  {node:'write_lesson', time:3100, msg:'write_lesson Ch3-L2'},
-  {node:'critic_node', time:1500, msg:'critic_node: pass ✔', cls:'critic'},
-  {node:'accept_lesson', time:200, msg:'accept_lesson Ch3-L2', cls:'done'},
-  {node:'activities_generator', time:2200, msg:'activities_generator Ch3'},
-  {node:'END', time:100, msg:'🏁 Pipeline complete (phase 2 ≈ 259s real)', cls:'end'}
+  {id:'S', desc:'START', time:100, msg:'🟢 Start pipeline', cls:'done'},
+  {id:'SA', desc:'self_awareness', time:300, msg:'self_awareness: detect missing fields'},
+  {id:'SP', desc:'search_planner', time:800, msg:'search_planner: plan query 1/5'},
+  {id:'WS', desc:'web_search', time:600, msg:'web_search: Serper call 1/5'},
+  {id:'SP', desc:'search_planner', time:700, msg:'search_planner: plan query 2/5'},
+  {id:'WS', desc:'web_search', time:600, msg:'web_search: Serper call 2/5'},
+  {id:'SP', desc:'search_planner', time:700, msg:'search_planner: plan query 3/5'},
+  {id:'WS', desc:'web_search', time:600, msg:'web_search: Serper call 3/5'},
+  {id:'SP', desc:'search_planner', time:700, msg:'search_planner: plan query 4/5'},
+  {id:'WS', desc:'web_search', time:600, msg:'web_search: Serper call 4/5'},
+  {id:'SP', desc:'search_planner', time:700, msg:'search_planner: plan query 5/5'},
+  {id:'WS', desc:'web_search', time:600, msg:'web_search: Serper call 5/5'},
+  {id:'CLR', desc:'clarify_with_user', time:400, msg:'⏸ clarify_with_user: HITL resumed'},
+  {id:'OG', desc:'outline_generator', time:2500, msg:'outline_generator: 3 chapters × 2 lessons'},
+  {id:'CG', desc:'chapter_guard', time:120, msg:'chapter_guard → Ch1'},
+  {id:'WL', desc:'write_lesson', time:3000, msg:'write_lesson Ch1-L1'},
+  {id:'CR', desc:'critic_node', time:1500, msg:'critic_node: pass ✔', cls:'critic'},
+  {id:'AL', desc:'accept_lesson', time:200, msg:'accept_lesson Ch1-L1', cls:'done'},
+  {id:'WL', desc:'write_lesson', time:3200, msg:'write_lesson Ch1-L2'},
+  {id:'CR', desc:'critic_node', time:1500, msg:'critic_node: pass ✔', cls:'critic'},
+  {id:'AL', desc:'accept_lesson', time:200, msg:'accept_lesson Ch1-L2', cls:'done'},
+  {id:'AG', desc:'activities_generator', time:2200, msg:'activities_generator Ch1'},
+  {id:'CG', desc:'chapter_guard', time:120, msg:'chapter_guard → Ch2'},
+  {id:'WL', desc:'write_lesson', time:3000, msg:'write_lesson Ch2-L1'},
+  {id:'CR', desc:'critic_node', time:1500, msg:'critic_node: fail ✘', cls:'critic'},
+  {id:'RL', desc:'reject_lesson', time:200, msg:'reject_lesson Ch2-L1 (retry 1)', cls:'critic'},
+  {id:'WL', desc:'write_lesson', time:3100, msg:'write_lesson Ch2-L1 (retry)'},
+  {id:'CR', desc:'critic_node', time:1500, msg:'critic_node: pass ✔', cls:'critic'},
+  {id:'AL', desc:'accept_lesson', time:200, msg:'accept_lesson Ch2-L1', cls:'done'},
+  {id:'WL', desc:'write_lesson', time:3100, msg:'write_lesson Ch2-L2'},
+  {id:'CR', desc:'critic_node', time:1500, msg:'critic_node: pass ✔', cls:'critic'},
+  {id:'AL', desc:'accept_lesson', time:200, msg:'accept_lesson Ch2-L2', cls:'done'},
+  {id:'AG', desc:'activities_generator', time:2200, msg:'activities_generator Ch2'},
+  {id:'CG', desc:'chapter_guard', time:120, msg:'chapter_guard → Ch3'},
+  {id:'WL', desc:'write_lesson', time:3000, msg:'write_lesson Ch3-L1'},
+  {id:'CR', desc:'critic_node', time:1500, msg:'critic_node: pass ✔', cls:'critic'},
+  {id:'AL', desc:'accept_lesson', time:200, msg:'accept_lesson Ch3-L1', cls:'done'},
+  {id:'WL', desc:'write_lesson', time:3100, msg:'write_lesson Ch3-L2'},
+  {id:'CR', desc:'critic_node', time:1500, msg:'critic_node: pass ✔', cls:'critic'},
+  {id:'AL', desc:'accept_lesson', time:200, msg:'accept_lesson Ch3-L2', cls:'done'},
+  {id:'AG', desc:'activities_generator', time:2200, msg:'activities_generator Ch3'},
+  {id:'E', desc:'END', time:100, msg:'🏁 Pipeline complete (~259s real)', cls:'end'}
 ];
 
 const optTrace = [
-  {node:'START', time:0, msg:'🟢 Start pipeline', cls:'done'},
-  {node:'self_awareness', time:200, msg:'self_awareness'},
-  {node:'search_planner_once', time:800, msg:'search_planner_once: 1 LLM call → 5 queries', cls:'parallel'},
-  {node:'web_search_parallel', time:800, msg:'web_search_parallel: asyncio.gather × 5 (all in parallel)', cls:'parallel'},
-  {node:'clarify_with_user', time:300, msg:'⏸ clarify_with_user: HITL resumed'},
-  {node:'outline_generator', time:2500, msg:'outline_generator: 3 chapters × 2 lessons'},
-  {node:'lesson_fanout', time:200, msg:'lesson_fanout: emits Send × 6', cls:'parallel'},
-  {node:'lesson_worker #1', time:0, msg:'▸ lesson_worker #1 START (Ch1-L1)', cls:'parallel'},
-  {node:'lesson_worker #2', time:0, msg:'▸ lesson_worker #2 START (Ch1-L2)', cls:'parallel'},
-  {node:'lesson_worker #N', time:3500, msg:'▸ workers #3..#6 running in parallel (Ch2-L1, Ch2-L2, Ch3-L1, Ch3-L2)', cls:'parallel'},
-  {node:'lesson_worker #1', time:0, msg:'✓ worker #1 done (write+critic inline)', cls:'done'},
-  {node:'lesson_worker #2', time:500, msg:'✓ worker #2 done', cls:'done'},
-  {node:'lesson_worker #N', time:300, msg:'✓ workers #3..#6 done', cls:'done'},
-  {node:'join_lessons', time:100, msg:'join_lessons: barrier, merge 6 lessons'},
-  {node:'activities_generator', time:2200, msg:'activities_generator Ch1'},
-  {node:'activities_generator', time:2200, msg:'activities_generator Ch2'},
-  {node:'activities_generator', time:2200, msg:'activities_generator Ch3'},
-  {node:'finalize', time:150, msg:'finalize: phase=done', cls:'done'},
-  {node:'END', time:100, msg:'🏁 Pipeline complete (phase 2 ≈ 83s real)', cls:'end'}
+  {id:'S', desc:'START', time:100, msg:'🟢 Start pipeline', cls:'done'},
+  {id:'SA', desc:'self_awareness', time:300, msg:'self_awareness'},
+  {id:'SPO', desc:'search_planner_once', time:900, msg:'search_planner_once: 1 LLM call → 5 queries', cls:'parallel'},
+  {id:'WSP', desc:'web_search_parallel', time:900, msg:'web_search_parallel: asyncio.gather × 5', cls:'parallel'},
+  {id:'CLR', desc:'clarify_with_user', time:400, msg:'⏸ clarify_with_user: HITL resumed'},
+  {id:'OG', desc:'outline_generator', time:2500, msg:'outline_generator: 3 chapters × 2 lessons'},
+  {id:'LF', desc:'lesson_fanout', time:300, msg:'lesson_fanout: emits Send × 6', cls:'parallel'},
+  {id:'W1', desc:'lesson_worker_1', time:200, msg:'▸ worker_1 START (Ch1-L1)', cls:'parallel'},
+  {id:'W2', desc:'lesson_worker_2', time:100, msg:'▸ worker_2 START (Ch1-L2)', cls:'parallel'},
+  {id:'WN', desc:'lesson_worker_N', time:100, msg:'▸ workers 3..6 START (parallel batch)', cls:'parallel'},
+  {id:'W1', desc:'lesson_worker_1', time:3500, msg:'✓ worker_1 done (write+critic inline)', cls:'done'},
+  {id:'W2', desc:'lesson_worker_2', time:400, msg:'✓ worker_2 done', cls:'done'},
+  {id:'WN', desc:'lesson_worker_N', time:300, msg:'✓ workers 3..6 done (xAI tier ~3 concurrent)', cls:'done'},
+  {id:'JL', desc:'join_lessons', time:150, msg:'join_lessons: barrier, merged 6 lessons'},
+  {id:'AG', desc:'activities_generator', time:2200, msg:'activities_generator Ch1'},
+  {id:'AG', desc:'activities_generator', time:2200, msg:'activities_generator Ch2'},
+  {id:'AG', desc:'activities_generator', time:2200, msg:'activities_generator Ch3'},
+  {id:'FIN', desc:'finalize', time:200, msg:'finalize: phase=done', cls:'done'},
+  {id:'E', desc:'END', time:100, msg:'🏁 Pipeline complete (~83s real · 2.93× vs current)', cls:'end'}
 ];
 
 async function simulate(which) {
@@ -292,9 +363,10 @@ async function simulate(which) {
   for (const step of trace) {
     const d = (step.time || 100) / speed;
     await new Promise(r => setTimeout(r, d));
-    highlight(which, step.node, '#fbbf24');
-    log(which, '<b>['+step.node+']</b> ' + step.msg, step.cls || '');
-    setTimeout(() => markDone(which, step.node), 400);
+    highlightNode(which, step.id, '#fbbf24');
+    setDesc(which, step.desc, step.msg);
+    log(which, '<b>['+step.desc+']</b> ' + step.msg, step.cls || '');
+    setTimeout(() => markDoneNode(which, step.id), 500);
   }
   btn.disabled = false;
 }
