@@ -1,99 +1,60 @@
 # Project plan — progress log (keyed to `syllabus_agent_spec.md`)
 
-> Canonical running log per spec §R1 intro. Last updated 2026-04-23.
+> Canonical running log. Last updated 2026-04-24.
 > Status legend: ✅ landed · 🟡 partial · ⏭️ deferred · ❌ not started
 
 ---
 
-## Spec alignment snapshot
+## 2026-04-24 — REWRITE: supervisor-pattern agent (`devin/<ts>-supervisor-agent`)
 
-### R1 — Authoritative overrides
+The R1/R2 linear pipeline (self_awareness → search_planner → web_search → clarify → outline → chapter_guard → writer/critic → activities → finalize) was replaced by a **supervisor-pattern agent**. The motivation came from the latest spec from the user: a central LLM-driven router that decides the next move, dynamic plan tools (`set_search_plan` / `set_todo_plan`), `ask_user` clarifications via `interrupt()`, parallel fan-out search/scrape via `Send`, and aggressive use of LangGraph Store for ephemeral data with explicit GC.
 
-| Area | Spec (R1) | Status | Notes |
-|---|---|---|---|
-| Frontend: Next.js 16.x + React 19 + Turbopack | R1.1 | ✅ | `apps/frontend` scaffolded at 16.2.4 / React 19. |
-| 3 OpenAI-compatible LLM endpoints (small/writer/critic) | R1.2 | ✅ | `agent/llm.py` with `_mk()` + same-model warning. |
-| Serper via `SERPER_API_KEY` | R1.2 | ✅ | wired in `web_search` + `web_search_parallel`. |
-| Supabase schema: syllabuses/chapters/lessons/activities + ON DELETE CASCADE | R1.3 | ✅ | applied; includes `teacher_preferences jsonb` per R2.9. |
-| Realtime enabled on all 4 tables | R1.3 | ✅ | consumed by `useSyllabusStore`. |
-| Activities Pydantic contract | R1.4 | ✅ | `activities_generator` node writes rows. |
-| Lesson stored as **markdown** (not BlockNote JSON) | R1.5 | ✅ | writer emits markdown; DB column `content_md`. |
-| Frontend renders markdown → BlockNote at view time | R1.6 | ⏭️ | viewer deferred this session (see Deferred). |
-| **Supabase Realtime is the only stream** for syllabus data | R1.7 | ✅ | `useSyllabusStore` hydrate-then-subscribe; LangGraph SSE used only for agent progress / chat. |
-| `Command(goto=…, update=…)` routing from `critic_node` | R1.8a | ✅ | `_critic_result` removed. |
-| `get_stream_writer` server-side typed events | R1.8b | ✅ | `agent/events.py` (this session); emitters in all phase nodes. |
-| `AsyncPostgresSaver` checkpointer on Supabase | R1.8c | ✅ | configured in `graph.py`. |
-| `BaseStore` cross-thread memory | R1.8d | 🟡 | `InMemoryStore` stub; `PostgresStore` upgrade deferred. |
-| `interrupt()` for human review on `needs_review: true` lessons | R1.8e | ⏭️ | reserved; no UI yet. |
-| Activities generator node | R1.9 | ✅ | plus reject-force-accept now routes through it via `include_activities` pref (bug fix this session). |
-| Graph topology: no `search_router` passthrough | R1.10 | ✅ | direct conditional edges. |
-| Security: no RLS / no auth, localhost-only | R1.11 | ✅ | documented in README. |
+### What landed
 
-### R1.12 backlog
+- **Architecture** (see `apps/agent/DESIGN.md`):
+  ```
+  supervisor ──► tool_calls? ──┬──► END (no calls)
+                               ├──► ask_user (interrupt)
+                               ├──► apply_search_plan ──► search_subgraph ──► supervisor
+                               ├──► apply_todo_plan   ──► writer_subgraph ──► supervisor
+                               └──► db_tools_node     ──► supervisor
+  ```
+- **Lightweight state** (`agent/state.py`): only ids, cursors, plans, capped messages, alias map, phase. No payloads. `messages` capped via custom reducer; candidates de-duped by `(step_id, url)`; plans full-replaced.
+- **LangGraph Store namespaces** + GC discipline (`agent/store_keys.py`): `("scrape", thread, step_id)` purged after `summarize_search`; `("draft", thread, todo_id)` purged after lesson commit or give-up; `("dep_summary", thread, todo_id)` retained for downstream lessons; `("search_summary", thread)` retained until next `set_search_plan`.
+- **Search subgraph** (`agent/search/`): `plan_step` → parallel `Send` fan-out to `search_query × N` → `pick_to_scrape` → parallel `Send` fan-out to `scrape_one × M` → `advance_step` (loop) → `summarize_search` (purge + write summary).
+  - Search via Serper.dev `/search`. Scrape via Serper `/scrape` with **`r.jina.ai` markdown fallback** (free, no key).
+- **Writer/Critic subgraph** (`agent/writer/`): `pick_next` (DAG-aware via `depends_on`) → `write` → `critic` → `decide` (accept/retry/give_up) with `MAX_WRITER_ATTEMPTS=3`. Reads dep summaries from Store. Commits lesson, marks chapter done if its last, saves `dep_summary`, GCs draft.
+- **Supervisor + middleware** (`agent/supervisor.py`): system prompt is built per-turn from persona + dynamic context block + a deterministic NEXT_ACTION hint computed from state shape. Tool messages are phrased to reflect the *post-subgraph* state so the LLM doesn't think searches are still running.
+- **Tools** (`agent/tools/`): `ask_user`, `set_search_plan`, `set_todo_plan`, `create_syllabus`, `create_chapters`, `list_thread_syllabi`. Plan tools are intent stubs — execution lives in `apply_*` nodes. DB tools execute Supabase writes idempotently (upsert-on-conflict by `thread_id` and `(syllabus_id, position)`).
+- **Chapter alias contract**: agent only sees `CH1`/`CH2`/… aliases. The supabase UUIDs live in `state.chapter_alias_map` and are resolved by the writer subgraph at commit time. Prevents UUID hallucination.
+- **Streaming events** (`agent/events.py`): `phase_changed`, `search_step_started`, `search_progress`, `search_summary_ready`, `todo_started`, `todo_step`, `critic_verdict`, `lesson_committed`, `chapter_committed`, `awaiting_input`, `error`. Frontend can stream these via `stream_mode=["custom", "updates"]`.
+- **LLM assignments**: supervisor + writer = `LLM_WRITER` (`stepfun-ai/step-3.5-flash` in test); critic = `LLM_CRITIC` (`mistralai/mistral-small-4-119b-2603`); summarizer = `LLM_SMALL` (`stepfun-ai/step-3.5-flash`). The user-supplied `nicoboss/DeepSeek-R1-Distill-Qwen-32B-Uncensored` is not in NVIDIA's catalog and `nim.api.nvidia.com` 403s — switched to step-3.5-flash for writer/small (verified tool calling + structured output).
 
-| Item | Status |
-|---|---|
-| Token / cost columns on `syllabuses` (`input_tokens`, `output_tokens`, `usd_cost`) | ❌ |
-| `evaluations` table for critic pass-rate | ❌ |
-| `logs` / `phase_history` timeline end-to-end (writer → runner → Supabase → FE) | 🟡 — typed events exist; persistence layer not wired. |
-| Human review UI + `interrupt()` resume | ❌ |
-| Eval harness (golden reqs → golden lessons) | ❌ |
-| `PostgresStore` swap-in for scrape/search caches | ❌ |
+### Removed (legacy R1/R2 nodes)
 
-### R2 — Clarification phase
+`self_awareness, search_planner, search_planner_once, web_search, web_search_parallel, clarify_with_user, syllabus_outline, chapter_guard, lesson_writer, lesson_worker, lesson_fanout, write_lesson, critic_node, accept_lesson, reject_lesson, activities_generator, finalize, init_node, graph_optimized.py, e2e_run*.py, agent/memory/store.py, tracing.py, prompts.py, llm.py, events.py, state.py, graph.py` — all gone. Tests reduced to a single import/topology smoke test plus state-reducer/plan-validation unit tests.
 
-| Area | Spec (R2) | Status |
-|---|---|---|
-| `clarify_with_user` node after web_search, before outline | R2.1/R2.4 | ✅ |
-| `TeacherPreferences` / `ClarificationQuestions` Pydantic contracts | R2.2/R2.3 | ✅ |
-| State channel additions (`teacher_preferences`, `clarification_questions`) | R2.5 | ✅ |
-| Graph topology update (web_search → clarify → outline) | R2.6 | ✅ |
-| Frontend clarification form (text / number / boolean / single_choice / multi_choice) | R2.7 | ✅ — `ClarifyForm` component + vitest. |
-| Bypass path for pre-filled `teacher_preferences` at submit | R2.8 | ✅ — short-circuit in `clarify_with_user`. |
-| SQL migration: `teacher_preferences jsonb` + `awaiting_input` phase | R2.9 | ✅ |
+### Verified end-to-end
 
----
+`apps/agent/e2e_run.py` runs a fresh thread through:
+1. Greeting → plain reply, no tools, no DB writes ✅
+2. "Build me a 4-week Intro to C++ syllabus..." → supervisor calls `set_search_plan` (3 steps × 2-3 queries × 3 scrapes parallel) → summarize → `create_syllabus` → `create_chapters` (CH1, CH2, CH3) → `set_todo_plan` (6 lessons with `depends_on` chain T1→T2→…→T6) → writer/critic loop, all 6 lessons critic-passed on attempt 1 (scores 90-95) → final plain-text reply. Supabase: 1 syllabus, 3 chapters, 6 lessons committed. Lesson content is classroom-ready markdown (~1000 words each, code blocks with language tags, "Check your understanding" sections, dependency-aware (T2 explicitly builds on T1's Hello World)). ✅
 
-## Landed this session (branch `feat/frontend-and-streaming-v2`)
+### Schema
 
-### Agent
-- `agent/events.py` — typed helper wrapping `langgraph.config.get_stream_writer`. No-op outside a run; swallows writer exceptions. Event contract mirrored in frontend `src/lib/types.ts (AgentEvent)`.
-- Emitters plumbed into: `init_node` (self_awareness), `web_search`, `clarify_with_user`, `chapter_guard`, `lesson_writer`, `critic`, `accept_lesson`, `reject_lesson`, `activities_generator`, `finalize`.
-- **Bug fix:** `reject_lesson` force-accept path now respects `teacher_preferences.include_activities` and routes to `activities_generator` (previously hard-coded to `chapter_guard`, skipping activities on 3rd-attempt force-accept).
-- **State sync:** `accept_lesson` + `reject_lesson` force-accept mirror the upserted row into `state.lessons` so the reducer matches Supabase.
-- Tests (pytest, 10 green): `test_events.py`, `test_nodes_accept_reject.py`.
+Recreated minimally: `syllabuses`, `chapters`, `lessons`, `activities` (kept the activities table per user instruction even though the new agent doesn't write to it yet — easy to re-enable later via a `set_activities_plan` tool). Realtime publication: all 4 tables.
 
-### Frontend — `apps/frontend/` (new)
-- Next.js 16.2.4, Tailwind v3, zinc + emerald palette, Inter.
-- Mobile-first three-pane shell (Sidebar drawer / CenterPlan / AgentPane).
-- Hooks: `useSyllabusStream`, `useAgentProgress` (pure reducer over `AgentEvent`), `useSyllabusStore` (Realtime + upsert-by-id), `useCancelStream`, `useThreadsSWR`, `useDraftStorage`.
-- Components: `AppShell`, `Sidebar`, `CenterPlan`, `ChapterList`, `PhaseBanner`, `SearchStatus`, `AgentPane`, `MessageList`, `Composer`, `ClarifyForm`.
-- Dockerfile (standalone output) + `railway.json`.
-- Tests (vitest + jsdom + testing-library, 14 green): `useAgentProgress`, `useDraftStorage`, `ClarifyForm`, `cn`.
-- `next build` + `tsc --noEmit` both green.
+### Deferred from the previous architecture
 
----
+- Activities generator (table exists; tool not yet defined for the supervisor — straightforward to add)
+- BlockNote readonly viewer (frontend, R1.6)
+- Human-review interrupt UI (frontend) — backend supports `ask_user` interrupt natively
+- `PostgresStore` swap-in (currently `InMemoryStore` — fine since Store data is thread-scoped and purged at run boundaries)
+- Token/cost instrumentation
+- Eval harness
 
-## Deferred (tracked, not done)
+### Known limitations
 
-1. **BlockNote readonly viewer** (R1.6) — markdown → BlockNote blocks on lesson row click.
-2. **Human-review interrupt UI** (R1.8e / R1.12) — reuse `ClarifyForm` pattern with a review schema.
-3. **`PostgresStore` swap-in** (R1.8d / R1.12) — replaces `InMemoryStore` for scrape/search caches.
-4. **Token + cost columns on `syllabuses`** (R1.12) — instrument LLM clients, write after `finalize`.
-5. **`evaluations` table** (R1.12) — critic pass-rate tracking.
-6. **`phase_history` persistence** (R1.12) — consume typed events into a DB timeline.
-7. **Eval harness** (R1.12) — golden requirements → golden lessons regression set.
-8. **Virtualization** (`@tanstack/react-virtual`) for long chapter lists.
-9. **Graph consolidation** — fold `graph_optimized.py` back into `graph.py` (parallel fan-out is stable).
-10. **Live E2E against deployed Railway agent** — smoke test hitting real agent with short syllabus.
-11. **LangGraph bump** — currently pinned `>= 0.6.0`; revisit when topology changes.
-
----
-
-## Next session — suggested priorities
-
-1. BlockNote readonly viewer + lesson detail drawer (unblocks R1.6 end-to-end).
-2. Human-review `interrupt()` wiring (closes R1.8e).
-3. Token/cost instrumentation + `phase_history` table (closes two R1.12 items together since both consume the stream).
-4. Graph consolidation + `PostgresStore`.
-5. E2E happy-path test against Railway.
+- Default writer model `stepfun-ai/step-3.5-flash` works well for ~6-lesson syllabi but timing depends on NVIDIA NIM availability. Configurable via env.
+- Search depends on `SERPER_API_KEY`; without it the search degrades to stub URLs but the rest of the pipeline still runs.
+- The frontend is unchanged; it consumes Supabase Realtime so chapter/lesson rows show up live, but the *typed event stream* now uses different event names — frontend `useAgentProgress` reducer needs a small adapter pass to handle new event types (deferred, separate PR).

@@ -1,97 +1,141 @@
-"""LangGraph state — IDs, cursors, plan contracts with chapter goals, critic reports."""
+"""Lightweight LangGraph state.
+
+Design rule: anything large lives in the LangGraph Store, NOT in state.
+State only carries identifiers, cursors, plans, and a capped message tail.
+"""
 from __future__ import annotations
-from typing import Annotated, Any, Optional, Literal, TypedDict
+from typing import Annotated, Any, Literal, Optional, TypedDict
+from pydantic import BaseModel, Field
+from langchain_core.messages import BaseMessage, SystemMessage
 from langgraph.graph.message import add_messages
 
-Phase = Literal["searching", "awaiting_input", "outlining", "writing", "done", "failed"]
+from .config import MESSAGE_TAIL_CAP
 
-class ChapterRef(TypedDict, total=False):
-    id: str
-    position: int
+
+# ─── plan contracts ────────────────────────────────────────────────────────
+StepStatus = Literal["pending", "searching", "scraping", "done"]
+
+
+class SearchStep(BaseModel):
+    """A single research step. The agent supplies the queries; we run them."""
+    id: str = Field(description="Stable id like S1, S2, …")
+    title: str = Field(description="Short human-readable goal of this step.")
+    queries: list[str] = Field(min_length=1, max_length=5)
+    status: StepStatus = "pending"
+
+
+class SearchPlan(BaseModel):
+    """Plan emitted by the supervisor's set_search_plan tool."""
+    global_goal: str = Field(description="What the *whole* search is for. Used at summarize time.")
+    steps: list[SearchStep] = Field(min_length=1, max_length=8)
+
+
+TodoStatus = Literal[
+    "pending", "writing", "critiquing", "accepted", "rejected", "failed"
+]
+
+
+class TodoStep(BaseModel):
+    id: str = Field(description="Stable id like T1, T2, …")
+    chapter_ref: str = Field(description="Alias like CH1 — never a UUID.")
+    name: str = Field(description="Lesson title or working title.")
+    description: str = Field(
+        description="Acceptance criteria — what MUST be covered, written in detail."
+    )
+    must_cover: list[str] = Field(default_factory=list)
+    depends_on: list[str] = Field(
+        default_factory=list,
+        description="Other TodoStep ids whose summaries this lesson reads."
+    )
+    status: TodoStatus = "pending"
+    attempts: int = 0
+    final_lesson_id: Optional[str] = None
+
+
+class TodoPlan(BaseModel):
+    steps: list[TodoStep] = Field(min_length=1, max_length=40)
+
+
+# ─── reducers ──────────────────────────────────────────────────────────────
+def capped_messages(left: list[BaseMessage], right: list[BaseMessage]) -> list[BaseMessage]:
+    """Append-then-tail-cap. Pinned: SystemMessage at index 0 if present."""
+    merged = add_messages(left, right)
+    if len(merged) <= MESSAGE_TAIL_CAP:
+        return merged
+    head: list[BaseMessage] = []
+    rest: list[BaseMessage] = []
+    for m in merged:
+        if isinstance(m, SystemMessage) and not head:
+            head.append(m)
+        else:
+            rest.append(m)
+    return head + rest[-(MESSAGE_TAIL_CAP - len(head)):]
+
+
+def merge_dict(left: Optional[dict], right: Optional[dict]) -> dict:
+    out = dict(left or {})
+    out.update(right or {})
+    return out
+
+
+def replace(_left, right):
+    return right
+
+
+# ─── candidate scratch (in-state for one step at a time, cleared by reducer) ─
+class SearchCandidate(TypedDict, total=False):
+    step_id: str
+    url: str
     title: str
-    goal: str
-    status: Literal["pending", "writing", "done"]
+    snippet: str
+    score: float
 
-class LessonRef(TypedDict, total=False):
-    id: str
-    substep_id: str
-    chapter_id: str
-    position: int
-    title: str
-    draft_attempts: int
-    needs_review: bool
 
-class LessonPlan(TypedDict, total=False):
-    substep_id: str
-    chapter_pos: int
-    position: int
-    title: str
-    serves_chapter_goal: str
-    learning_objective: str
-    must_cover: list[str]
-    grammar_point: str
-    vocab_targets: list[str]
+def merge_candidates(
+    left: list[SearchCandidate], right: list[SearchCandidate]
+) -> list[SearchCandidate]:
+    """De-dup by (step_id, url), keep highest score."""
+    by_key: dict[tuple[str, str], SearchCandidate] = {}
+    for c in (left or []) + (right or []):
+        if not c:
+            continue
+        k = (c.get("step_id", ""), c.get("url", ""))
+        prev = by_key.get(k)
+        if not prev or (c.get("score", 0) > prev.get("score", 0)):
+            by_key[k] = c
+    return list(by_key.values())
 
-class ActivityPlan(TypedDict, total=False):
-    substep_id: str
-    scope: Literal["lesson", "chapter"]
-    chapter_pos: int
-    depends_on_lesson_positions: list[int]
-    kind: str
-    title: str
-    instructions: str
-    requirements: list[str]
-    status: Literal["pending", "done"]
 
-class CriticReport(TypedDict, total=False):
-    substep_id: str
-    attempt: int
-    score: int
-    passes: bool
-    per_criterion: list[dict]
-    weaknesses: list[str]
-    critique: str
+Phase = Literal[
+    "idle", "awaiting_input", "searching", "summarizing",
+    "outlining", "writing", "done", "failed",
+]
 
-def upsert_by_id(left: list, right: list) -> list:
-    by_id = {r.get("id") or r.get("substep_id"): r for r in left}
-    for r in right:
-        k = r.get("id") or r.get("substep_id")
-        by_id[k] = {**by_id.get(k, {}), **r}
-    return list(by_id.values())
 
-def capped_findings(left: list[str], right: list[str]) -> list[str]:
-    merged = list(left) + list(right)
-    seen, out = set(), []
-    for f in merged:
-        if f in seen: continue
-        seen.add(f); out.append(f)
-    return out[-20:]
+class State(TypedDict, total=False):
+    # Conversation — capped reducer keeps state lightweight.
+    messages: Annotated[list[BaseMessage], capped_messages]
 
-def capped_reports(left: list, right: list) -> list:
-    merged = list(left or []) + list(right or [])
-    return merged[-40:]
-
-class SyllabusState(TypedDict, total=False):
+    # Identity / context
     thread_id: str
     syllabus_id: Optional[str]
-    requirements: str
-    title: Optional[str]
-    phase: Phase
-    teacher_preferences: Optional[dict]
-    search_queries: list[str]
-    search_cursor: int
-    findings: Annotated[list[str], capped_findings]
-    chapters: Annotated[list[ChapterRef], upsert_by_id]
-    lessons: Annotated[list[LessonRef], upsert_by_id]
-    lesson_plans: Annotated[list[LessonPlan], upsert_by_id]
-    activity_plans: Annotated[list[ActivityPlan], upsert_by_id]
-    critic_reports: Annotated[list[CriticReport], capped_reports]
-    active_chapter_id: Optional[str]
-    active_lesson_id: Optional[str]
-    messages: Annotated[list, add_messages]
-    _draft: Optional[dict]
-    _draft_chapter_pos: Optional[int]
-    _draft_position: Optional[int]
-    _draft_substep_id: Optional[str]
-    _draft_attempts: int
-    _critique: Optional[str]
+    requirements: Optional[str]
+    teacher_preferences: Annotated[Optional[dict], merge_dict]
+
+    # Plans (full-replace)
+    search_plan: Annotated[Optional[dict], replace]   # serialized SearchPlan
+    search_summary: Annotated[Optional[str], replace]
+    todo_plan: Annotated[Optional[dict], replace]    # serialized TodoPlan
+
+    # Chapter alias map — agent only ever sees CH1/CH2 aliases.
+    chapter_alias_map: Annotated[dict[str, str], merge_dict]
+
+    # Subgraph cursors
+    search_step_idx: int
+    todo_step_idx: int
+
+    # Search scratch (cleared at end of each step)
+    _search_candidates: Annotated[list[SearchCandidate], merge_candidates]
+
+    # Phase mirror for FE streaming
+    phase: Annotated[Phase, replace]
