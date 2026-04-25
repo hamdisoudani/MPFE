@@ -1,0 +1,166 @@
+"use client";
+import React, { memo, useCallback, useState } from "react";
+import { useQueryState } from "nuqs";
+import { useThreads, threadVariant } from "@/providers/Thread";
+import { useThreadStore } from "@/stores/thread-store";
+import type { AgentVariant } from "@/providers/client";
+import { Loader2, Plus, RefreshCcw, Trash2, Sparkles, Zap, GitBranch } from "lucide-react";
+
+function firstUserPreview(t: any): string {
+  const vals = t?.values as any;
+  const msgs = vals?.messages ?? [];
+  const first = msgs.find((m: any) => m?.type === "human" || m?.role === "user");
+  const c = first?.content;
+  if (typeof c === "string") return c.slice(0, 60);
+  if (Array.isArray(c)) {
+    const t0 = c.find((p: any) => p?.type === "text");
+    if (t0?.text) return String(t0.text).slice(0, 60);
+  }
+  return t?.thread_id?.slice(0, 8) ?? "(empty)";
+}
+
+type ThreadRowProps = {
+  thread: any;
+  active: boolean;
+  onPick: (id: string) => void;
+  onDelete: (id: string) => void;
+};
+
+const ThreadRow = memo(function ThreadRow({ thread, active, onPick, onDelete }: ThreadRowProps) {
+  const v = threadVariant(thread);
+  const VIcon = v === "deep" ? Sparkles : v === "v2" ? GitBranch : Zap;
+  const id = thread.thread_id as string;
+  const handleClick = useCallback(() => onPick(id), [id, onPick]);
+  const handleDelete = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      onDelete(id);
+    },
+    [id, onDelete],
+  );
+  return (
+    <div
+      onClick={handleClick}
+      className={`group flex cursor-pointer items-start gap-2 border-b border-[var(--border)] px-3 py-2 transition-colors ${
+        active
+          ? "bg-[var(--accent)] text-[var(--accent-foreground)] border-l-2 border-l-[var(--primary)]"
+          : "hover:bg-[var(--muted)]"
+      }`}
+    >
+      <VIcon className={`mt-0.5 h-3 w-3 shrink-0 ${v === "deep" ? "text-[var(--primary)]" : "text-[var(--muted-foreground)]"}`} />
+      <div className="flex-1 min-w-0">
+        <div className="truncate text-[var(--foreground)]">{firstUserPreview(thread)}</div>
+        <div className="text-[10px] text-[var(--muted-foreground)] mt-0.5">
+          {id.slice(0, 8)} · {v} · {thread.status ?? "idle"}
+        </div>
+      </div>
+      <button
+        onClick={handleDelete}
+        className="opacity-0 group-hover:opacity-100 text-[var(--muted-foreground)] hover:text-[var(--destructive)] transition-opacity"
+        title="Delete"
+      >
+        <Trash2 className="h-3 w-3" />
+      </button>
+    </div>
+  );
+}, (a, b) => {
+  // Only re-render when the identity of the item actually changed — not on every
+  // SWR poll that returns a freshly-allocated array of structurally-equal threads.
+  if (a.active !== b.active) return false;
+  if (a.onPick !== b.onPick || a.onDelete !== b.onDelete) return false;
+  const ta = a.thread, tb = b.thread;
+  if (ta === tb) return true;
+  return (
+    ta?.thread_id === tb?.thread_id &&
+    ta?.status === tb?.status &&
+    ta?.updated_at === tb?.updated_at &&
+    firstUserPreview(ta) === firstUserPreview(tb)
+  );
+});
+
+export function ThreadHistory() {
+  const { threads, isLoading, isValidating, refreshThreads, createThread, deleteThread } = useThreads();
+  const [threadId, setThreadId] = useQueryState("threadId");
+  const setActive = useThreadStore((s) => s.setActiveThread);
+  const [nextVariant, setNextVariant] = useState<AgentVariant>("classic");
+
+  const onNew = useCallback(async () => {
+    const t = await createThread(nextVariant);
+    await setThreadId(t.thread_id);
+    setActive(t.thread_id);
+  }, [createThread, nextVariant, setThreadId, setActive]);
+
+  const onPick = useCallback(
+    async (id: string) => {
+      await setThreadId(id);
+      setActive(id);
+    },
+    [setThreadId, setActive],
+  );
+
+  const onDelete = useCallback(
+    async (id: string) => {
+      await deleteThread(id);
+      if (threadId === id) {
+        await setThreadId(null);
+        setActive(null);
+      }
+    },
+    [deleteThread, threadId, setThreadId, setActive],
+  );
+
+  return (
+    <div className="flex h-full flex-col bg-[var(--sidebar)] text-[var(--sidebar-foreground)] text-sm">
+      <div className="flex items-center gap-1 border-b border-[var(--sidebar-border)] px-2 py-2">
+        <p className="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)] mr-auto">Threads</p>
+        <select
+          value={nextVariant}
+          onChange={(e) => setNextVariant(e.target.value as AgentVariant)}
+          className="rounded-md bg-[var(--muted)] text-[var(--foreground)] text-[10px] px-1 py-1 border border-[var(--border)] cursor-pointer"
+          title="Agent variant for the NEXT new thread (cannot change later)"
+        >
+          <option value="classic">Classic</option>
+          <option value="deep">Deep</option>
+          <option value="v2">V2 (Router)</option>
+        </select>
+        <button
+          onClick={onNew}
+          className="flex items-center gap-1 rounded-md bg-[var(--primary)] text-[var(--primary-foreground)] px-2 py-1 text-xs font-medium hover:opacity-90 transition-opacity"
+          title={`New ${nextVariant} thread`}
+        >
+          <Plus className="h-3 w-3" /> New
+        </button>
+        <button
+          onClick={() => refreshThreads()}
+          className="rounded-md bg-[var(--muted)] text-[var(--muted-foreground)] px-2 py-1 text-xs hover:bg-[var(--accent)] hover:text-[var(--accent-foreground)] transition-colors"
+          title="Refresh"
+          aria-label="Refresh threads"
+        >
+          <RefreshCcw className={`h-3 w-3 ${isValidating ? "animate-spin" : ""}`} />
+        </button>
+        <span className="text-[10px] text-[var(--muted-foreground)] opacity-70 tabular-nums ml-1">{threads.length}</span>
+      </div>
+      <div className="flex-1 overflow-y-auto">
+        {isLoading && threads.length === 0 && (
+          <div className="flex items-center gap-2 p-3 text-xs text-[var(--muted-foreground)]">
+            <Loader2 className="h-3 w-3 animate-spin" /> Loading threads…
+          </div>
+        )}
+        {!isLoading && threads.length === 0 && (
+          <div className="p-3 text-xs text-[var(--muted-foreground)]">
+            No threads yet. Click <span className="text-[var(--primary)] font-medium">New</span>.
+          </div>
+        )}
+        {threads.map((t: any) => (
+          <ThreadRow
+            key={t.thread_id}
+            thread={t}
+            active={t.thread_id === threadId}
+            onPick={onPick}
+            onDelete={onDelete}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}

@@ -21,3 +21,6 @@ apps/*/.env.local
 
 # OS
 .DS_Store
+
+apps/frontend_old_backup/
+apps/frontend/tsconfig.tsbuildinfo
