@@ -22,14 +22,14 @@ type StreamOpts = {
 export function useSyllabusAgent({ threadId, onThreadId, variant }: StreamOpts = {}) {
   const assistantId = assistantIdFor(variant ?? "classic");
 
-  // If we have a cached messages snapshot for this thread, skip the
-  // `fetchStateHistory` round-trip on mount. That pull downloads the full
-  // checkpoint stream from the server and is the main cause of the 1 Mbit/s
-  // spike when reloading the page during a long-running run. The live SSE
-  // stream will still overlay any deltas on top of the cached seed.
-  const hasCachedSnapshot = useThreadMessagesCache((s) =>
-    threadId ? s.has(threadId) : false
+  // If we have a cached messages snapshot for this thread, seed the stream
+  // with it via `initialValues` so the transcript paints immediately on
+  // reload — `useStream` will then rejoin the live SSE stream and overlay
+  // any deltas on top. This avoids the "blank chat on reload" behavior.
+  const cachedEntry = useThreadMessagesCache((s) =>
+    threadId ? s.entries[threadId] : undefined
   );
+  const cachedMessages = cachedEntry?.messages;
 
   const options = useMemo(() => {
     const base: any = {
@@ -37,15 +37,20 @@ export function useSyllabusAgent({ threadId, onThreadId, variant }: StreamOpts =
       assistantId,
       messagesKey: "messages" as const,
       reconnectOnMount: true,
-      // Only pull full checkpoint history when we have nothing to render from.
-      // On warm reloads the cache seeds the UI and we rejoin the live stream
-      // without re-downloading every historical snapshot.
-      fetchStateHistory: !hasCachedSnapshot,
+      // Always fetch state history — this is what populates `stream.messages`
+      // for the existing thread on mount. Setting it false and relying only
+      // on `initialValues` leaves the hook with an empty messages array
+      // once the live stream swaps in, which was causing reloads to paint
+      // blank until the next supervisor turn.
+      fetchStateHistory: true,
       defaultHeaders: langgraphHeaders(),
       onThreadId,
+      initialValues: cachedMessages
+        ? { messages: cachedMessages }
+        : undefined,
     };
     return threadId ? { ...base, threadId } : base;
-  }, [assistantId, hasCachedSnapshot, threadId, onThreadId]);
+  }, [assistantId, cachedMessages, threadId, onThreadId]);
 
   return useStream<{ messages: any[] }>(options as any);
 }

@@ -47,8 +47,8 @@ import {
   Wand2,
 } from "lucide-react";
 import { useSyllabusAgent } from "@/lib/useSyllabusAgent";
-import { useThreads } from "@/providers/Thread";
 import { Markdown } from "@/components/chat/Markdown";
+import { useThreadMessagesCache } from "@/stores/thread-messages-cache";
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 interface AgentMessage {
@@ -460,7 +460,6 @@ function PhaseBadge({ phase, streaming }: { phase?: string; streaming: boolean }
 // ─── Main ──────────────────────────────────────────────────────────────────
 export function ChatPane() {
   const [threadId, setThreadId] = useQueryState("threadId");
-  const { createThread } = useThreads();
 
   const stream = useSyllabusAgent({
     threadId,
@@ -481,6 +480,15 @@ export function ChatPane() {
 
   const messagesRaw = (stream.messages ?? []) as AgentMessage[];
   const messages = useMemo(() => messagesRaw.map(mapMessage), [messagesRaw]);
+
+  // Seed the per-thread message cache so warm reloads can repaint the
+  // transcript from localStorage before/while SSE reconnects. Throttled by
+  // messages.length to avoid writing on every token delta.
+  const cacheSet = useThreadMessagesCache((s) => s.set);
+  useEffect(() => {
+    if (!threadId || messagesRaw.length === 0) return;
+    cacheSet(threadId, messagesRaw);
+  }, [threadId, messagesRaw.length, cacheSet, messagesRaw]);
   const values = (stream.values ?? {}) as Record<string, unknown>;
   const phase = typeof values.phase === "string" ? (values.phase as string) : undefined;
   const searchPlan = values.search_plan as SearchPlanV | null | undefined;
@@ -498,7 +506,6 @@ export function ChatPane() {
   const isStreaming = !!stream.isLoading && !hasInterrupt;
 
   const [composerText, setComposerText] = useState("");
-  const [busy, setBusy] = useState(false);
 
   // Auto-scroll
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -519,27 +526,21 @@ export function ChatPane() {
   }, [messages.length, isStreaming, hasInterrupt]);
 
   // ─── Handlers ────────────────────────────────────────────────────────────
+  // The SDK's useStream auto-creates a thread on submit when threadId is
+  // null/undefined and fires `onThreadId` with the new id (we wire that to
+  // the URL above). So we don't create one manually — doing so raced with
+  // the stream hook rebinding to the new id and caused the very first send
+  // to be orphaned (message never rendered because the submit went against
+  // a stream bound to the old `threadId=null`).
   const submitUserMessage = useCallback(
-    async (text: string) => {
+    (text: string) => {
       stickyRef.current = true;
-      try {
-        setBusy(true);
-        // Create a thread lazily if none yet.
-        let tid = threadId;
-        if (!tid) {
-          const t = await createThread("classic");
-          tid = t.thread_id;
-          await setThreadId(tid);
-        }
-        stream.submit?.(
-          { messages: [{ role: "user", content: text }] },
-          { streamSubgraphs: true },
-        );
-      } finally {
-        setBusy(false);
-      }
+      stream.submit?.(
+        { messages: [{ role: "user", content: text }] },
+        { streamSubgraphs: true },
+      );
     },
-    [threadId, createThread, setThreadId, stream],
+    [stream],
   );
 
   const answerInterrupt = useCallback(
@@ -566,20 +567,20 @@ export function ChatPane() {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         const v = composerText.trim();
-        if (!v || busy || isStreaming) return;
+        if (!v || isStreaming) return;
         setComposerText("");
-        void submitUserMessage(v);
+        submitUserMessage(v);
       }
     },
-    [composerText, busy, isStreaming, submitUserMessage],
+    [composerText, isStreaming, submitUserMessage],
   );
 
   const onSendClick = useCallback(() => {
     const v = composerText.trim();
-    if (!v || busy || isStreaming) return;
+    if (!v || isStreaming) return;
     setComposerText("");
-    void submitUserMessage(v);
-  }, [composerText, busy, isStreaming, submitUserMessage]);
+    submitUserMessage(v);
+  }, [composerText, isStreaming, submitUserMessage]);
 
   const errorText =
     stream.error && typeof stream.error === "object" && "message" in stream.error
@@ -747,13 +748,11 @@ export function ChatPane() {
             type="button"
             onClick={onSendClick}
             disabled={
-              !composerText.trim() || busy || isStreaming || hasInterrupt
+              !composerText.trim() || isStreaming || hasInterrupt
             }
             className="inline-flex h-9 items-center gap-1 rounded-md bg-[var(--primary)] px-3 text-[13px] font-semibold text-[var(--primary-foreground)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {busy ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : isStreaming ? (
+            {isStreaming ? (
               <Pause className="h-3.5 w-3.5" />
             ) : (
               <Play className="h-3.5 w-3.5" />
