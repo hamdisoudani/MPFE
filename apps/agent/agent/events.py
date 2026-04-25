@@ -71,6 +71,13 @@ def emit_lesson_committed(step_id: str, lesson_id: str, chapter_id: str, title: 
     )
 
 
+def emit_activity_committed(step_id: str, activity_id: str, chapter_id: str, title: str) -> None:
+    emit(
+        "activity_committed",
+        step_id=step_id, activity_id=activity_id, chapter_id=chapter_id, title=title,
+    )
+
+
 def emit_chapter_committed(chapter_ref: str, chapter_id: str, title: str, position: int) -> None:
     emit(
         "chapter_committed",

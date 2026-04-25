@@ -30,7 +30,7 @@ from ..events import (
     emit_phase, emit_search_progress, emit_search_step,
     emit_search_summary_ready, emit_error,
 )
-from ..state import SearchPlan
+from ..state import SearchPlan, _CLEAR_CANDIDATES_SENTINEL
 from ..store_keys import (
     ns_scrape, ns_search_summary, purge_all_scrapes, purge_namespace,
 )
@@ -64,7 +64,8 @@ def plan_step(state: dict) -> dict:
     emit_search_step(step.id, step.title, idx + 1, len(plan.steps))
     return {
         "search_plan": _plan_to_state(plan),
-        "_search_candidates": [],   # reset scratch for this step
+        # Reset scratch for this step (sentinel clear).
+        "_search_candidates": [_CLEAR_CANDIDATES_SENTINEL],
         "phase": "searching",
     }
 
@@ -198,7 +199,8 @@ async def advance_step(state: dict, *, store: BaseStore) -> dict:
     return {
         "search_plan": _plan_to_state(plan) if plan else None,
         "search_step_idx": idx + 1,
-        "_search_candidates": [],   # GC scratch between steps (replaced by reducer)
+        # GC scratch between steps via sentinel.
+        "_search_candidates": [_CLEAR_CANDIDATES_SENTINEL],
     }
 
 
@@ -264,5 +266,7 @@ async def summarize_search(state: dict, *, store: BaseStore) -> dict:
     return {
         "search_summary": summary,
         "phase": "outlining",
-        # Reset cursor + plan retained for visibility in supervisor context.
+        # Final GC for the scratch — we no longer need candidate metadata
+        # now that we have the synthesized summary.
+        "_search_candidates": [_CLEAR_CANDIDATES_SENTINEL],
     }

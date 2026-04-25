@@ -49,8 +49,10 @@ def _format_todo_plan(plan_dict: dict | None) -> str:
     out = []
     for s in plan_dict.get("steps") or []:
         deps = ",".join(s.get("depends_on") or []) or "-"
+        kind = s.get("kind") or "lesson"
         out.append(
-            f"  - {s['id']} [{s.get('status', 'pending')}] {s['chapter_ref']} {s['name']} "
+            f"  - {s['id']} <{kind}> [{s.get('status', 'pending')}] "
+            f"{s['chapter_ref']} {s['name']} "
             f"(deps: {deps}, attempts: {s.get('attempts', 0)})"
         )
     return "\n".join(out) or "  (none yet)"
@@ -77,8 +79,14 @@ def _next_action_hint(state: dict) -> str:
         return ("Call `create_chapters` with the chapter list; use the search summary to "
                 "decide chapter ordering and titles.")
     if syllabus_id and cmap and not todo_steps:
-        return ("Call `set_todo_plan` with one TodoStep per lesson; use chapter aliases "
-                f"({sorted(cmap.keys())}). Add `depends_on` where appropriate.")
+        return (
+            "Call `set_todo_plan` with one TodoStep per lesson AND a final "
+            "activity-kind step per chapter (`kind: \"activity\"`) evaluating "
+            "its lessons. Use chapter aliases "
+            f"({sorted(cmap.keys())}). Add `depends_on` (prior lesson Tn ids) "
+            "for any lesson that builds on earlier ones, and each activity "
+            "MUST depend on the lessons it tests."
+        )
     if todo_steps and not pending and not failed and accepted:
         return ("All lessons committed. Reply ONCE in plain text summarizing what was "
                 "created. Do NOT call any more tools.")
@@ -289,12 +297,14 @@ async def apply_todo_plan(state: dict) -> dict:
         extras.append(ToolMessage(content="(deferred — only set_todo_plan was processed this turn)", tool_call_id=c["id"]))
 
     emit_phase("writing")
+    lessons = sum(1 for s in plan.steps if s.kind == "lesson")
+    activities = sum(1 for s in plan.steps if s.kind == "activity")
     msg = ToolMessage(
         content=(
-            f"Todo plan accepted with {len(plan.steps)} lessons. The system "
-            "ran the writer/critic loop. Final per-step statuses are now "
-            "visible under 'Todo plan steps' in the CURRENT CONTEXT. Proceed "
-            "to the NEXT ACTION."
+            f"Todo plan accepted: {lessons} lessons + {activities} activities. "
+            "The system ran the writer/critic loop. Final per-step statuses "
+            "are now visible under 'Todo plan steps' in the CURRENT CONTEXT. "
+            "Proceed to the NEXT ACTION."
         ),
         tool_call_id=call["id"],
     )

@@ -5,7 +5,7 @@ detects the call and routes the run into the relevant subgraph. The
 "execution" of the tool itself is just to acknowledge & validate.
 """
 from __future__ import annotations
-from typing import Optional
+from typing import Literal, Optional
 
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
@@ -33,21 +33,30 @@ class SetSearchPlanArgs(BaseModel):
 
 class TodoStepArg(BaseModel):
     id: str = Field(description="Stable id like T1, T2, …")
+    kind: Literal["lesson", "activity"] = Field(
+        description="REQUIRED. 'lesson' = classroom-ready Markdown. "
+                    "'activity' = JSON graded multiple-choice quiz. "
+                    "Activities MUST depend on the 1-2 lessons they "
+                    "evaluate (list those in `depends_on`).",
+    )
     chapter_ref: str = Field(description="Alias such as CH1, CH2 — never a UUID.")
-    name: str = Field(description="Lesson title.")
-    description: str = Field(description="Acceptance criteria — what MUST be covered, in detail.")
+    name: str = Field(description="Lesson or activity title.")
+    description: str = Field(description="Acceptance criteria — what MUST be covered/tested, in detail.")
     must_cover: list[str] = Field(default_factory=list, description="Concrete, atomic items that must appear.")
     depends_on: list[str] = Field(
         default_factory=list,
-        description="Other todo step ids whose summaries the writer should read."
+        description="Other todo step ids whose summaries this step reads. "
+                    "For an activity this MUST include the lesson(s) it tests.",
     )
 
 
 class SetTodoPlanArgs(BaseModel):
     """Use this when you have decided the chapter list and want to write
-    the lessons. One TodoStep per lesson. Reference chapters by their
-    alias (CH1...). Use `depends_on` when a lesson builds on previous
-    lessons in the same syllabus.
+    the lessons AND activities. One TodoStep per item — each has `kind`
+    set to `"lesson"` or `"activity"`. Reference chapters by their alias
+    (CH1...). Use `depends_on` when a lesson builds on previous lessons
+    or an activity tests specific lessons; lessons MUST appear before
+    the activities that depend on them.
     """
     steps: list[TodoStepArg] = Field(min_length=1, max_length=40)
 

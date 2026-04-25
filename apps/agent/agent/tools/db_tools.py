@@ -121,3 +121,24 @@ def exec_set_chapter_status(chapter_id: str, status: str) -> None:
         supabase().table("chapters").update({"status": status}).eq("id", chapter_id).execute()
     except Exception:
         pass
+
+
+def exec_commit_activity(
+    *, syllabus_id: str, chapter_id: str, lesson_id: str | None,
+    substep_id: str, position: int, title: str,
+    payload: dict, draft_attempts: int,
+) -> dict:
+    """Upsert an activity row. payload is a JSON quiz/exercise spec."""
+    sb = supabase()
+    row = {
+        "syllabus_id": syllabus_id,
+        "chapter_id": chapter_id,
+        "lesson_id": lesson_id,
+        "substep_id": substep_id,
+        "position": position,
+        "title": title,
+        "payload": payload,
+        "draft_attempts": draft_attempts,
+    }
+    res = sb.table("activities").upsert(row, on_conflict="substep_id").execute()
+    return (res.data or [{}])[0]

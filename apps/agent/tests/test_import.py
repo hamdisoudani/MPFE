@@ -70,3 +70,17 @@ def test_plan_validation():
         }]
     })
     assert tp.steps[0].chapter_ref == "CH1"
+    assert tp.steps[0].kind == "lesson"  # default
+
+    # Activity kind round-trip
+    tp2 = TodoPlan.model_validate({
+        "steps": [
+            {"id": "T1", "chapter_ref": "CH1", "name": "Foundations",
+             "description": "Teach basics", "must_cover": ["a", "b"]},
+            {"id": "T2", "kind": "activity", "chapter_ref": "CH1",
+             "name": "Ch1 quiz", "description": "Assess T1",
+             "must_cover": ["a"], "depends_on": ["T1"]},
+        ]
+    })
+    assert tp2.steps[1].kind == "activity"
+    assert tp2.steps[1].depends_on == ["T1"]

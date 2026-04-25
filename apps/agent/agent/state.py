@@ -35,21 +35,33 @@ TodoStatus = Literal[
 ]
 
 
+TodoKind = Literal["lesson", "activity"]
+
+
 class TodoStep(BaseModel):
     id: str = Field(description="Stable id like T1, T2, …")
+    kind: TodoKind = Field(
+        default="lesson",
+        description="'lesson' = classroom-ready Markdown. 'activity' = JSON "
+                    "quiz (multiple-choice, graded). Activities SHOULD declare "
+                    "depends_on pointing at the lesson(s) they test.",
+    )
     chapter_ref: str = Field(description="Alias like CH1 — never a UUID.")
-    name: str = Field(description="Lesson title or working title.")
+    name: str = Field(description="Lesson/activity title or working title.")
     description: str = Field(
-        description="Acceptance criteria — what MUST be covered, written in detail."
+        description="Acceptance criteria — what MUST be covered / tested, written in detail."
     )
     must_cover: list[str] = Field(default_factory=list)
     depends_on: list[str] = Field(
         default_factory=list,
-        description="Other TodoStep ids whose summaries this lesson reads."
+        description="Other TodoStep ids whose summaries this step reads. "
+                    "For an activity, at least one dep SHOULD be a lesson this "
+                    "activity evaluates.",
     )
     status: TodoStatus = "pending"
     attempts: int = 0
     final_lesson_id: Optional[str] = None
+    final_activity_id: Optional[str] = None
 
 
 class TodoPlan(BaseModel):
@@ -91,10 +103,24 @@ class SearchCandidate(TypedDict, total=False):
     score: float
 
 
+_CLEAR_CANDIDATES_SENTINEL = {"__clear_search_candidates__": True}
+
+
 def merge_candidates(
-    left: list[SearchCandidate], right: list[SearchCandidate]
+    left: list[SearchCandidate], right: list[SearchCandidate] | None
 ) -> list[SearchCandidate]:
-    """De-dup by (step_id, url), keep highest score."""
+    """De-dup by (step_id, url), keep highest score.
+
+    GC: if `right` contains the sentinel candidate
+    `{"__clear_search_candidates__": True}`, the scratch is CLEARED (and
+    any other elements in the same update are ignored — callers should
+    emit only the sentinel). Normal empty-list updates are a no-op
+    (a zero-result search must not wipe peers' results during fan-out).
+    """
+    if right and any(
+        isinstance(c, dict) and c.get("__clear_search_candidates__") for c in right
+    ):
+        return []
     by_key: dict[tuple[str, str], SearchCandidate] = {}
     for c in (left or []) + (right or []):
         if not c:

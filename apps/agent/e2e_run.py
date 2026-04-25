@@ -43,7 +43,12 @@ async def stream_run(graph, payload, config) -> dict:
             ns_str = "/".join(ns) if ns else "(root)"
             print(f"[evt {ns_str}] {t}  {extras}")
         elif mode == "updates":
+            if not isinstance(chunk, dict):
+                # interrupt updates come through as tuples — skip pretty-print
+                continue
             for node, upd in chunk.items():
+                if not isinstance(upd, dict):
+                    continue
                 msgs = (upd or {}).get("messages") or []
                 for m in msgs:
                     role = m.__class__.__name__
@@ -85,29 +90,35 @@ async def main():
     last = state.values.get("messages") or []
     print(f"\nfinal turn-1 message count={len(last)}")
 
-    # ── Step 2: ask for a syllabus ──
-    print("\n========= TURN 2: build syllabus =========")
+    # ── Step 2: ask for a syllabus (very vague — should trigger ask_user) ──
+    print("\n========= TURN 2: build syllabus (very vague request) =========")
     state = await stream_run(graph, {
         "messages": [HumanMessage(
-            "I'd like to build a short Introduction to C++ syllabus for "
-            "first-year CS students with no prior programming experience. "
-            "Aim for 3 chapters with 2 lessons each, 4 weeks total."
+            "Hey can you build me a syllabus about Python? Thanks."
         )],
     }, config)
 
     # If the run was interrupted by ask_user, resume with a canned answer.
     interrupts = list((await graph.aget_state(config)).interrupts or [])
     rounds = 0
+    canned_answers = [
+        # First clarifying round — provide audience + format.
+        "Audience: high-school seniors, no prior programming experience. "
+        "Hands-on format, with code examples in every lesson and one "
+        "graded quiz per chapter. ~3 weeks, ~2 hours/week. Please include "
+        "activities (multiple-choice quizzes) at the end of each chapter "
+        "so students can self-assess.",
+        # Second clarifying round — structural confirmation.
+        "Three chapters with two lessons and one quiz-activity each is "
+        "fine. Please proceed.",
+        "Whatever you judge best is fine; proceed.",
+        "Whatever you judge best is fine; proceed.",
+    ]
     while interrupts and rounds < 4:
-        rounds += 1
         question = interrupts[0].value.get("question", "")
-        print(f"\n[interrupt] {question}")
-        canned = (
-            "First-year CS students, no prior programming experience. "
-            "Hands-on, exam-prep oriented, 4 weeks of study, ~3 hours/week. "
-            "Include code examples in every lesson. 3 chapters with 2 lessons each is fine. "
-            "Yes please proceed with that chapter shape."
-        )
+        print(f"\n[interrupt #{rounds+1}] {question}")
+        canned = canned_answers[min(rounds, len(canned_answers) - 1)]
+        rounds += 1
         print(f"[resume w/] {canned[:100]}…")
         state = await stream_run(graph, Command(resume=canned), config)
         interrupts = list((await graph.aget_state(config)).interrupts or [])
@@ -128,13 +139,36 @@ async def main():
         from agent.db.supabase_client import supabase
         sb = supabase()
         ch = sb.table("chapters").select("id,position,title,status").eq("syllabus_id", v["syllabus_id"]).order("position").execute().data
-        ls = sb.table("lessons").select("id,chapter_id,position,title").eq("syllabus_id", v["syllabus_id"]).order("position").execute().data
+        ls = sb.table("lessons").select("id,chapter_id,position,title,content_markdown").eq("syllabus_id", v["syllabus_id"]).order("position").execute().data
+        acts = sb.table("activities").select("id,chapter_id,lesson_id,position,title,payload").eq("syllabus_id", v["syllabus_id"]).order("position").execute().data
         print(f"DB chapters ({len(ch)}):")
         for c in ch:
             print(f"  pos={c['position']} status={c['status']} title={c['title']}")
         print(f"DB lessons ({len(ls)}):")
         for l in ls:
-            print(f"  pos={l['position']} title={l['title']}")
+            print(f"  pos={l['position']} title={l['title']} md_bytes={len(l.get('content_markdown') or '')}")
+        print(f"DB activities ({len(acts)}):")
+        for a in acts:
+            pl = a.get("payload") or {}
+            qs = pl.get("questions") or []
+            print(f"  pos={a['position']} title={a['title']} questions={len(qs)} lesson_id={a.get('lesson_id')}")
+            for i, q in enumerate(qs[:2]):
+                print(f"    Q{i+1}: {_short(q.get('prompt',''), 100)}  correct_idx={q.get('correct_index')}")
+
+    # ── State size audit ──
+    print("\n========= STATE SIZE AUDIT =========")
+    import sys as _sys
+    for key, val in v.items():
+        try:
+            size = len(json.dumps(val, default=str))
+        except Exception:
+            size = _sys.getsizeof(val)
+        if key == "messages":
+            msg_count = len(val or [])
+            total = sum(len(str(getattr(m, 'content', '') or '')) for m in (val or []))
+            print(f"  messages: count={msg_count}, content_chars={total}")
+        else:
+            print(f"  {key}: ~{size} chars")
     return 0
 
 
