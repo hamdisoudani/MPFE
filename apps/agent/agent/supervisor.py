@@ -161,7 +161,12 @@ async def supervisor_node(state: dict, config: RunnableConfig | None = None) -> 
         # No user message yet — bail with a stub. Should not happen in normal use.
         convo = [HumanMessage("Hi.")]
 
-    llm = supervisor_llm().bind_tools(ALL_TOOLS, tool_choice="auto")
+    # Deterministically pick a tool_choice policy based on state + intent.
+    # Models like stepfun-ai ignore prompt rules about "use ask_user"; we
+    # force the issue here so greetings can't trigger tools and syllabus
+    # requests can't bypass ask_user / set_search_plan with plain text.
+    tool_choice = _pick_tool_choice(state, convo)
+    llm = supervisor_llm().bind_tools(ALL_TOOLS, tool_choice=tool_choice)
     try:
         ai = await llm.ainvoke([SystemMessage(sys), *convo])
     except Exception as e:
@@ -169,6 +174,94 @@ async def supervisor_node(state: dict, config: RunnableConfig | None = None) -> 
         ai = AIMessage(f"(supervisor error: {e})")
 
     return {"messages": [ai], "_supervisor_turn": turn, **updates}
+
+
+# ── tool_choice policy ─────────────────────────────────────────────────────
+_SYLLABUS_INTENT_VERBS = (
+    "syllabus", "curriculum", "course outline", "lesson plan",
+    "build me", "build a ", "design a course", "make a course",
+    "create a course", "draft a course", "teach a course",
+    "course on", "workshop", "bootcamp",
+)
+
+
+def _looks_like_syllabus_request(text: str) -> bool:
+    t = text.lower()
+    return any(kw in t for kw in _SYLLABUS_INTENT_VERBS)
+
+
+def _pick_tool_choice(state: dict, convo: list[BaseMessage]) -> str:
+    """Decide whether the supervisor LLM must / may / must-not call a tool.
+
+    Returns one of:
+      - "none" — plain text only (greetings / chitchat / post-summary recap)
+      - "required" / "any" — the model MUST call a tool (kicking off work)
+      - "auto" — the model decides
+
+    We explicitly force "required" when a human message with syllabus intent
+    arrives and no plan / summary / syllabus_id exists yet — otherwise some
+    providers happily answer the clarifier in plain text and never call
+    `ask_user`, which breaks the interrupt-driven UX.
+    """
+    has_summary = bool(state.get("search_summary"))
+    syllabus_id = state.get("syllabus_id")
+    cmap = state.get("chapter_alias_map") or {}
+    todo_plan = state.get("todo_plan") or {}
+    todo_steps = todo_plan.get("steps") or []
+    accepted = [s for s in todo_steps if s.get("status") == "accepted"]
+    pending = [s for s in todo_steps if s.get("status") == "pending"]
+    failed = [s for s in todo_steps if s.get("status") == "failed"]
+
+    last_human = ""
+    for m in reversed(convo):
+        if isinstance(m, HumanMessage):
+            last_human = str(getattr(m, "content", "") or "")
+            break
+    looks_syllabus = _looks_like_syllabus_request(last_human)
+
+    # Have we already kicked off a syllabus flow on this thread? If any
+    # prior AI message called a workflow tool (ask_user, set_search_plan,
+    # create_syllabus, create_chapters, set_todo_plan), the teacher's
+    # latest message is almost certainly a continuation — we should keep
+    # treating it as a syllabus task even if it doesn't contain one of the
+    # kickoff keywords.
+    WORKFLOW_TOOLS = {
+        "ask_user",
+        "set_search_plan",
+        "create_syllabus",
+        "create_chapters",
+        "set_todo_plan",
+    }
+    syllabus_in_flight = False
+    for m in convo:
+        if isinstance(m, AIMessage):
+            for tc in getattr(m, "tool_calls", None) or []:
+                if tc.get("name") in WORKFLOW_TOOLS:
+                    syllabus_in_flight = True
+                    break
+        if syllabus_in_flight:
+            break
+
+    # Post-commit recap: the system already wrote everything — no more tools.
+    if todo_steps and not pending and not failed and accepted:
+        return "none"
+
+    # Kickoff or continuation: no plan state committed yet. If the teacher
+    # asked for a syllabus (new request) OR we're mid-setup after a prior
+    # ask_user/set_search_plan, force the model to call a tool. Otherwise
+    # (pure chitchat, no prior workflow) no tools allowed.
+    if not has_summary and not syllabus_id and not cmap and not todo_steps:
+        if looks_syllabus or syllabus_in_flight:
+            # "required" is the widely-supported OpenAI-style keyword for
+            # "model MUST call at least one tool"; most OpenAI-compatible
+            # NVIDIA endpoints accept it.
+            return "required"
+        return "none"
+
+    # Mid-workflow states (has_summary but no syllabus_id, etc.): the
+    # system prompt's NEXT_ACTION hint already tells the model what to do;
+    # auto is fine here because the next tool is deterministic.
+    return "auto"
 
 
 # ── router ─────────────────────────────────────────────────────────────────
