@@ -18,7 +18,7 @@ function sb() {
 export async function fetchSyllabusByThread(threadId: string): Promise<Syllabus | null> {
   const { data, error } = await sb()
     .from("syllabuses")
-    .select("id, thread_id, title, description")
+    .select("id, thread_id, title, requirements")
     .eq("thread_id", threadId)
     .limit(1)
     .maybeSingle();

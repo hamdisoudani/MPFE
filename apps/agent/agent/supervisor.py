@@ -9,10 +9,12 @@ Topology piece (top-level graph):
                           └──► db_tools_node ──► supervisor
 """
 from __future__ import annotations
+import asyncio
 from typing import Any
 from langchain_core.messages import (
     AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage,
 )
+from langchain_core.runnables import RunnableConfig
 from langgraph.types import interrupt
 from langgraph.store.base import BaseStore
 
@@ -125,8 +127,13 @@ def _strip_system(messages: list[BaseMessage]) -> list[BaseMessage]:
 
 
 # ── supervisor ─────────────────────────────────────────────────────────────
-async def supervisor_node(state: dict) -> dict:
-    """Single LLM turn with tools bound. The router reads tool_calls."""
+async def supervisor_node(state: dict, config: RunnableConfig | None = None) -> dict:
+    """Single LLM turn with tools bound. The router reads tool_calls.
+
+    Also back-fills `state.thread_id` from the run config on first entry so
+    downstream nodes (DB upsert on `thread_id`, Store namespace scoping) see
+    the right value — langgraph dev does not inject thread_id into state.
+    """
     turn = state.get("_supervisor_turn", 0) + 1
     if turn > SUPERVISOR_MAX_TURNS:
         return {
@@ -137,6 +144,16 @@ async def supervisor_node(state: dict) -> dict:
             "_supervisor_turn": turn,
             "phase": "failed",
         }
+
+    updates: dict[str, Any] = {}
+    if not state.get("thread_id"):
+        tid = ""
+        if config and isinstance(config.get("configurable"), dict):
+            tid = str(config["configurable"].get("thread_id") or "")
+        if tid:
+            updates["thread_id"] = tid
+            # mirror so _build_system_prompt sees it below
+            state = {**state, "thread_id": tid}
 
     sys = _build_system_prompt(state)
     convo = _strip_system(state.get("messages") or [])
@@ -151,7 +168,7 @@ async def supervisor_node(state: dict) -> dict:
         emit_error("supervisor", str(e))
         ai = AIMessage(f"(supervisor error: {e})")
 
-    return {"messages": [ai], "_supervisor_turn": turn}
+    return {"messages": [ai], "_supervisor_turn": turn, **updates}
 
 
 # ── router ─────────────────────────────────────────────────────────────────
@@ -334,7 +351,7 @@ async def db_tools_node(state: dict) -> dict:
             if name == "create_syllabus":
                 title = args.get("title") or "(untitled)"
                 req = args.get("requirements")
-                row = exec_create_syllabus(state.get("thread_id", ""), title, req)
+                row = await asyncio.to_thread(exec_create_syllabus, state.get("thread_id", ""), title, req)
                 syllabus_update["syllabus_id"] = row.get("id")
                 syllabus_update["title"] = row.get("title")
                 out_msgs.append(ToolMessage(
@@ -349,7 +366,7 @@ async def db_tools_node(state: dict) -> dict:
                     ))
                     continue
                 sid = syllabus_update.get("syllabus_id") or state.get("syllabus_id")
-                amap = exec_create_chapters(sid, args.get("chapters") or [])
+                amap = await asyncio.to_thread(exec_create_chapters, sid, args.get("chapters") or [])
                 cmap_update.update(amap)
                 # emit per-chapter committed events
                 for ref, uuid in amap.items():
@@ -361,7 +378,7 @@ async def db_tools_node(state: dict) -> dict:
                     tool_call_id=cid,
                 ))
             elif name == "list_thread_syllabi":
-                rows = exec_list_thread_syllabi(state.get("thread_id", ""))
+                rows = await asyncio.to_thread(exec_list_thread_syllabi, state.get("thread_id", ""))
                 out_msgs.append(ToolMessage(
                     content=f"{len(rows)} prior syllabi: {rows}",
                     tool_call_id=cid,

@@ -23,6 +23,7 @@ export interface Syllabus {
   thread_id: string | null;
   title: string;
   description?: string | null;
+  requirements?: string | null;
 }
 
 export interface Chapter {
@@ -46,6 +47,8 @@ export interface Lesson {
   needs_review?: boolean | null;
   last_author?: string | null;
   draft_attempts?: number | null;
+  updated_at?: string | null;
+  created_at?: string | null;
 }
 
 export type ActivityKind = 'quiz';
@@ -258,6 +261,10 @@ export const useSyllabusStore = create<SyllabusStore>()((set, get) => ({
           thread_id: row.thread_id ?? slice.syllabus?.thread_id ?? null,
           title: row.title ?? slice.syllabus?.title ?? '',
           description: row.description ?? slice.syllabus?.description ?? null,
+          requirements:
+            (row as { requirements?: string | null }).requirements ??
+            slice.syllabus?.requirements ??
+            null,
         },
       }))
     ),
