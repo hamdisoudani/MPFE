@@ -71,7 +71,7 @@ async def build_compiled_with_postgres():
 
 
 # Default export — for `langgraph dev` / langgraph.json.
-graph = build_graph().compile(
-    checkpointer=InMemorySaver(),
-    store=InMemoryStore(),
-)
+# The LangGraph platform (and `langgraph dev`) injects its own checkpointer +
+# store at runtime, so the exported graph must NOT ship with custom ones.
+# For standalone scripts / tests, use `build_compiled_memory()` instead.
+graph = build_graph().compile()
